@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e51db1be56216b64498827a85e0668b4, type: 3}
+  m_Name: BattleGridRecipe_6x6
+  m_EditorClassIdentifier: 
+  width: 6
+  height: 6
+  orientation: 0
+  useOddROffset: 1
+  outerRadius: 1
+  thickness: 0.3
+  tileMaterial: {fileID: 2100000, guid: 104ddb02a7e4c254e8c6c94ec7e3c364, type: 2}
+  borderMode: 2
+  borderWidth: 0.05
+  borderYOffset: 0.001
+  borderColor: {r: 1, g: 1, b: 1, a: 0.65}
+  borderMaterial: {fileID: 0}
+  emptyColumns: 
+  enableRandomHoles: 0
+  holeChance: 0
+  randomSeed: 12345

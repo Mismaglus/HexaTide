@@ -1,5 +1,5 @@
 using UnityEngine;
-using Game.Battle; // 引用 SelectionManager, BattleUnit
+using Game.Battle; // 引用 SelectionManager, BattleUnit, BattleController
 using Game.Units;  // 引用 Unit
 
 namespace Game.UI
@@ -9,62 +9,84 @@ namespace Game.UI
         [Header("UI References")]
         public SkillBarPopulator populator; // 负责生成图标的那个脚本
 
-        [Header("System References")]
-        public SelectionManager selectionManager;
+        // 私有变量，等待 Initialize 注入
+        private SelectionManager _selectionManager;
 
-        // 缓存当前选中的单位，避免重复刷新
+        // 缓存当前选中的单位
         private Unit _currentUnit;
 
         void Awake()
         {
-            // 自动查找系统
-            if (selectionManager == null)
-                selectionManager = FindFirstObjectByType<SelectionManager>(FindObjectsInactive.Exclude);
-
-            // 自动查找同一物体或子物体上的 Populator
+            // 只保留自身组件的查找，不找外部依赖
             if (populator == null)
                 populator = GetComponentInChildren<SkillBarPopulator>();
         }
 
-        void OnEnable()
+        // ⭐ 这就是报错缺少的那个方法！
+        public void Initialize(BattleController battle)
         {
-            if (selectionManager != null)
+            if (battle == null) return;
+
+            // 1. 尝试查找 SelectionManager
+            // 先试着从 BattleController 身上找
+            _selectionManager = battle.GetComponent<SelectionManager>();
+
+            // 如果没找到，再去场景全局找 (双重保险)
+            if (_selectionManager == null)
+                _selectionManager = FindFirstObjectByType<SelectionManager>();
+
+            if (_selectionManager != null)
             {
-                selectionManager.OnSelectedUnitChanged += HandleSelectionChanged;
-                // 初始化时刷新一次
-                HandleSelectionChanged(selectionManager.SelectedUnit);
+                // 2. 订阅事件 (先减后加，防止重复)
+                _selectionManager.OnSelectedUnitChanged -= HandleSelectionChanged;
+                _selectionManager.OnSelectedUnitChanged += HandleSelectionChanged;
+
+                // 3. 立即刷新一次 (以防已经选中了单位)
+                HandleSelectionChanged(_selectionManager.SelectedUnit);
+
+                Debug.Log("[SkillBarController] 初始化成功");
+            }
+            else
+            {
+                Debug.LogError("[SkillBarController] 找不到 SelectionManager，技能栏无法工作！");
             }
         }
 
-        void OnDisable()
+        void OnDestroy()
         {
-            if (selectionManager != null)
-                selectionManager.OnSelectedUnitChanged -= HandleSelectionChanged;
+            if (_selectionManager != null)
+                _selectionManager.OnSelectedUnitChanged -= HandleSelectionChanged;
         }
+
+        // === 下面的逻辑保持不变 ===
 
         void HandleSelectionChanged(Unit unit)
         {
             _currentUnit = unit;
 
-            // 1. 没选中单位，或者单位没有战斗组件 -> 清空技能栏
+            // 1. 基础检查：没选中、没组件、或者是敌人 -> 清空
             if (unit == null || !unit.TryGetComponent<BattleUnit>(out var battleUnit))
             {
                 ClearSkillBar();
                 return;
             }
 
-            // 2. 选中了 -> 读取 BattleUnit 里的技能列表
-            // 注意：BattleUnit.abilities 是我们在上一步刚刚加进去的 List<Ability>
+            // ⭐ 新增判断：如果不是玩家可控单位，也清空技能栏
+            // (这样选中敌人时，技能栏会变空，避免误导玩家)
+            if (!battleUnit.IsPlayerControlled)
+            {
+                ClearSkillBar();
+                return;
+            }
+
+            // 2. 是自己人 -> 显示技能
             if (populator != null)
             {
-                // 把单位的技能列表复制给 UI
                 populator.abilities.Clear();
                 if (battleUnit.abilities != null)
                 {
                     populator.abilities.AddRange(battleUnit.abilities);
                 }
-
-                // 让 UI 重绘
                 populator.Populate();
             }
         }
@@ -74,11 +96,8 @@ namespace Game.UI
             if (populator != null)
             {
                 populator.abilities.Clear();
-                populator.Populate(); // 空列表 Populate = 清空图标
+                populator.Populate();
             }
         }
-
-        // 可选：如果你想以后做“快捷键按下”，可以在 Update 里监听 Input 
-        // 然后调用 UseAbility(index) ...
     }
 }

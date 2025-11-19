@@ -1,43 +1,46 @@
 using UnityEngine;
 using Game.UI;
-// using Game.Battle; // 如果这一行报错，说明 namespace 不对，可以先注释掉
+using Game.Battle;
+using System.Linq; // 用于查找
 
 public class BattleUIRoot : MonoBehaviour
 {
-    // ⭐ 确保这一行存在，保存后 Inspector 里应该出现这个槽位
     [Header("Child Panels")]
     public TurnControlUI turnControlUI;
+    public UnitFrameUI unitFrameUI; // ⭐ 新增：把 UnitFrameUI 也拖进来
 
     void Awake()
     {
-        // 核心：把自己注册进全局引用，Bootstrap 才能找到我
         BattleRuntimeRefs.RegisterUIRoot(this);
-        Debug.Log("[BattleUIRoot] Registered self to BattleRuntimeRefs.");
     }
 
-    // 由 GameBootstrap 调用
     public void Initialize(BattleController battle)
     {
-        if (battle == null)
-        {
-            Debug.LogError("[BattleUIRoot] Initialize received NULL BattleController!");
-            return;
-        }
+        if (battle == null) return;
 
-        Debug.Log("[BattleUIRoot] Wiring up UI...");
+        Debug.Log("[BattleUIRoot] Starting Initialization sequence...");
 
-        // 获取状态机
-        // 注意：根据你的截图，StateMachine 和 Controller 在同一个 System 物体上
-        // 如果它们在不同物体，请调整获取方式
-        var stateMachine = battle.GetComponent<Game.Battle.BattleStateMachine>();
-
+        // 1. 连接 TurnControlUI
+        var stateMachine = battle.GetComponent<BattleStateMachine>();
         if (turnControlUI != null && stateMachine != null)
         {
             turnControlUI.Initialize(stateMachine);
         }
-        else
+
+        // 2. 连接 UnitFrameUI (关键步骤)
+        // 此时 Battle 场景已加载，我们可以放心地找 SelectionManager 了
+        var selectionManager = FindFirstObjectByType<SelectionManager>();
+
+        if (unitFrameUI != null)
         {
-            Debug.LogError($"[BattleUIRoot] Wiring failed! TurnUI={turnControlUI}, SM={stateMachine}");
+            if (selectionManager != null)
+            {
+                unitFrameUI.Initialize(selectionManager);
+            }
+            else
+            {
+                Debug.LogError("[BattleUIRoot] 居然找不到 SelectionManager！请检查 Battle 场景 System 物体。");
+            }
         }
     }
 }

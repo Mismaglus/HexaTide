@@ -5,8 +5,8 @@ using System.Collections;
 public class GameBootstrap : MonoBehaviour
 {
     [Header("Scene Names")]
-    public string battleUiSceneName = "BattleUI";
-    public string firstBattleSceneName = "Battle_Prototype";
+    public string battleUiSceneName = "BattleUI"; // 确保和截图名字一致
+    public string firstBattleSceneName = "Battle";   // 截图里叫 "Battle"，不是 "Battle_Prototype"
 
     void Start()
     {
@@ -15,20 +15,27 @@ public class GameBootstrap : MonoBehaviour
 
     IEnumerator BootRoutine()
     {
-        // 确保当前是 Single 模式加载的 Main_Persistent
-        // 然后加 UI Scene
-        var uiOp = SceneManager.LoadSceneAsync(battleUiSceneName, LoadSceneMode.Additive);
-        yield return uiOp;
+        // 1. 加载 UI
+        yield return SceneManager.LoadSceneAsync(battleUiSceneName, LoadSceneMode.Additive);
 
-        // 再加第一个战斗场景
-        var battleOp = SceneManager.LoadSceneAsync(firstBattleSceneName, LoadSceneMode.Additive);
-        yield return battleOp;
+        // 2. 加载 战斗
+        yield return SceneManager.LoadSceneAsync(firstBattleSceneName, LoadSceneMode.Additive);
 
-        // 这里可以做一些初始化，比如设置活动场景
+        // 3. 设置活动场景 (为了光照和生成物体的归属)
         var battleScene = SceneManager.GetSceneByName(firstBattleSceneName);
-        if (battleScene.IsValid())
+        if (battleScene.IsValid()) SceneManager.SetActiveScene(battleScene);
+
+        // === 关键步骤：手动连线 ===
+        // 此时两个场景的 Awake 都跑完了，Refs 里应该都有东西了
+        var refs = BattleRuntimeRefs.Instance;
+
+        if (refs.uiRoot != null && refs.battleController != null)
         {
-            SceneManager.SetActiveScene(battleScene);
+            refs.uiRoot.Initialize(refs.battleController);
+        }
+        else
+        {
+            Debug.LogError($"Bootstrap Error: Missing refs. UI: {refs.uiRoot}, Battle: {refs.battleController}");
         }
     }
 }

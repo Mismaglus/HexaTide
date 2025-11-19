@@ -2,43 +2,31 @@ using UnityEngine;
 
 public class BattleUIRoot : MonoBehaviour
 {
+    // ... 你的 Panel 引用 ...
     public EndTurnPanel endTurnPanel;
-    public SkillBarController skillBarController;
-
-    BattleController _battle;
+    public SkillBarController skillBarController; // 假设你有这个
 
     void Awake()
     {
+        // 这一步保留，把自己注册进去
         BattleRuntimeRefs.RegisterUIRoot(this);
     }
 
-    void Start()
+    // 删除 void Start() {...} 
+
+    // 新增：由外部（Bootstrap）调用的初始化方法
+    public void Initialize(BattleController battle)
     {
-        // Start 阶段战斗 Scene 一般已经加载完了，可以尝试拿引用
-        _battle = BattleRuntimeRefs.Instance != null
-            ? BattleRuntimeRefs.Instance.battleController
-            : null;
-
-        if (_battle == null)
+        if (battle == null)
         {
-            Debug.LogWarning("BattleUIRoot: no BattleController found yet.");
-        }
-        else
-        {
-            WireUpPanels();
-        }
-    }
-
-    void WireUpPanels()
-    {
-        if (endTurnPanel != null)
-        {
-            endTurnPanel.Initialize(_battle);
+            Debug.LogError("BattleUIRoot: Initialize called with null BattleController!");
+            return;
         }
 
-        if (skillBarController != null)
-        {
-            skillBarController.Initialize(_battle);
-        }
+        // 这里连接具体的子面板
+        if (endTurnPanel != null) endTurnPanel.Initialize(battle);
+        // if (skillBarController != null) skillBarController.Initialize(battle); 
+
+        Debug.Log("UI Wired Up Successfully!");
     }
 }

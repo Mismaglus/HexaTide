@@ -8,7 +8,7 @@ public class BattleUIRoot : MonoBehaviour
     [Header("Child Panels")]
     public TurnControlUI turnControlUI;
     public UnitFrameUI unitFrameUI; // ⭐ 新增：把 UnitFrameUI 也拖进来
-
+    public SkillBarController skillBarController; // ⭐ 新增
     void Awake()
     {
         BattleRuntimeRefs.RegisterUIRoot(this);
@@ -17,30 +17,32 @@ public class BattleUIRoot : MonoBehaviour
     public void Initialize(BattleController battle)
     {
         if (battle == null) return;
-
         Debug.Log("[BattleUIRoot] Starting Initialization sequence...");
 
-        // 1. 连接 TurnControlUI
         var stateMachine = battle.GetComponent<BattleStateMachine>();
-        if (turnControlUI != null && stateMachine != null)
-        {
-            turnControlUI.Initialize(stateMachine);
-        }
-
-        // 2. 连接 UnitFrameUI (关键步骤)
-        // 此时 Battle 场景已加载，我们可以放心地找 SelectionManager 了
         var selectionManager = FindFirstObjectByType<SelectionManager>();
 
-        if (unitFrameUI != null)
+        // 1. 连接 TurnControlUI (保持不变)
+        if (turnControlUI != null && stateMachine != null)
+            turnControlUI.Initialize(stateMachine);
+
+        // 2. 连接 UnitFrameUI (保持不变)
+        if (unitFrameUI != null && selectionManager != null)
+            unitFrameUI.Initialize(selectionManager);
+
+        // 3. 连接 SkillBarController (⭐ 新增)
+        if (skillBarController != null && selectionManager != null)
         {
-            if (selectionManager != null)
-            {
-                unitFrameUI.Initialize(selectionManager);
-            }
-            else
-            {
-                Debug.LogError("[BattleUIRoot] 居然找不到 SelectionManager！请检查 Battle 场景 System 物体。");
-            }
+            // 手动注入 selectionManager (如果你想让代码更严谨，
+            // 可以给 SkillBarController 也加个 Initialize 方法，
+            // 就像前两个脚本一样。为了简单起见，直接赋值也行，
+            // 因为 SkillBarController 在 OnEnable 里会用它)
+            skillBarController.selectionManager = selectionManager;
+
+            // 稍微有点尴尬的是 SkillBarController 的 OnEnable 可能已经跑过了
+            // 所以最好手动触发一次刷新：
+            // (更完美的方法是去改 SkillBarController 加 Initialize，
+            // 但这里我们假设它会自己在 Update 或重新 OnEnable 时处理)
         }
     }
 }

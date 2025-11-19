@@ -60,9 +60,19 @@ namespace Game.Units
 
             [Tooltip("Current hit points.")]
             public int HP;
+            // === 2. 新增 MP (Mana) ===
+            [Tooltip("Maximum mana points.")]
+            [Range(0, 10)] public int MPMax;
 
-            [Tooltip("Action points available each round. Baseline 4.")]
-            [Range(0, 10)] public int AP;
+            [Tooltip("Current mana points.")]
+            public int MP;
+
+            // === 2. 新增 MP (Mana) ===
+            [Tooltip("Maximum mana points.")]
+            [Range(0, 10)] public int APMax;
+
+            [Tooltip("Current action points.")]
+            public int AP;
 
             [Tooltip("Tiles that can be moved each round. Suggested 3-6.")]
             [Range(0, 10)] public int Stride;

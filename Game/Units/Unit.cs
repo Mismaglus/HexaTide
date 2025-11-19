@@ -16,7 +16,10 @@ namespace Game.Units
         [Header("Refs")]
         public MonoBehaviour gridComponent;   // Inspector 拖任何实现 IHexGridProvider 的组件
         IHexGridProvider grid;
-
+        // 在 Unit.cs 里的开头部分添加：
+        [Header("Identity")]
+        public string unitName = "Unknown Unit";
+        public Sprite portrait; // 用于 UI 显示的头像
         [Header("Motion")]
         [Tooltip("移动一格所需秒数")]
         public float secondsPerTile = 0.2f;

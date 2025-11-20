@@ -22,7 +22,6 @@ namespace Game.Battle
         public BattleHexGrid grid;
         [SerializeField] BattleStateMachine _battleSM;
 
-        // ⭐ 新增：引用瞄准系统，用于状态检查，防止高亮冲突
         public AbilityTargetingSystem targetingSystem;
 
         [Header("Range")]
@@ -65,8 +64,10 @@ namespace Game.Battle
         {
             if (_battleSM == null)
                 _battleSM = UnityEngine.Object.FindFirstObjectByType<BattleStateMachine>();
+        }
 
-            // ⭐ 自动查找瞄准系统
+        void Start()
+        {
             if (targetingSystem == null)
                 targetingSystem = UnityEngine.Object.FindFirstObjectByType<AbilityTargetingSystem>();
         }
@@ -225,20 +226,24 @@ namespace Game.Battle
 
         void OnHoverChanged(HexCoords? h)
         {
-            // ⭐ 拦截逻辑：如果正在瞄准技能，这里直接退出，不再干扰高亮
+            if (targetingSystem == null) targetingSystem = UnityEngine.Object.FindFirstObjectByType<AbilityTargetingSystem>();
+
+            // ⭐ 关键修复：如果处于瞄准模式，强制 SelectionManager 停止高亮
             if (targetingSystem != null && targetingSystem.IsTargeting)
             {
-                // 清除之前可能残留的黄色 Hover，确保干净
+                // 必须清理掉 SelectionManager 可能遗留的黄色高亮
+                // 否则它会一直卡在最后一帧的状态
                 if (_hoverCache.HasValue)
                 {
-                    _hoverCache = null;
                     highlighter.SetHover(null);
+                    _hoverCache = null;
                 }
-                return;
+                return; // 直接退出，不执行下面的逻辑
             }
 
-            // === 以下保持原样 ===
+            // === 以下逻辑保持不变 ===
             _hoverCache = h;
+            highlighter.SetHover(h);
 
             Unit newHover = null;
             if (h.HasValue) TryGetUnitAt(h.Value, out newHover);
@@ -269,6 +274,9 @@ namespace Game.Battle
 
         void OnTileClicked(HexCoords c)
         {
+            // ⭐ 关键修复：如果处于瞄准模式，禁止 SelectionManager 处理点击（移动/选人）
+            if (targetingSystem != null && targetingSystem.IsTargeting) return;
+
             if (TryGetUnitAt(c, out var unit))
             {
                 if (SelectedUnit == unit) { Deselect(); return; }

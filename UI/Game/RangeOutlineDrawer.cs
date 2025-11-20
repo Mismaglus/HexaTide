@@ -12,11 +12,8 @@ namespace Game.UI
         public BattleHexGrid grid;
 
         [Header("Appearance")]
-        [Tooltip("轮廓线颜色")]
         public Color outlineColor = new Color(0.2f, 0.8f, 1.0f, 1.0f); // 亮青色
-        [Tooltip("轮廓线宽度")]
         public float width = 0.1f;
-        [Tooltip("垂直高度偏移 (防止与地面穿模)")]
         public float yOffset = 0.15f;
 
         private MeshFilter _mf;
@@ -28,16 +25,21 @@ namespace Game.UI
             _mf = GetComponent<MeshFilter>();
             _mr = GetComponent<MeshRenderer>();
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
-
-            // 初始化材质属性块
             _mpb = new MaterialPropertyBlock();
 
-            // 尝试设置一个默认材质 (防止变紫)
             if (_mr.sharedMaterial == null)
             {
-                var shader = Shader.Find("Universal Render Pipeline/Unlit");
-                if (!shader) shader = Shader.Find("Unlit/Color");
+                var shader = Shader.Find("Sprites/Default");
                 if (shader) _mr.sharedMaterial = new Material(shader);
+            }
+        }
+
+        void LateUpdate()
+        {
+            if (grid != null)
+            {
+                transform.position = grid.transform.position;
+                transform.rotation = grid.transform.rotation;
             }
         }
 
@@ -48,32 +50,26 @@ namespace Game.UI
 
             _mr.enabled = true;
 
-            // 1. 构建掩码 (HexMask)
             var recipe = grid.recipe;
             var mask = new HexMask(recipe.width, recipe.height);
-
             foreach (var t in tiles)
             {
-                if (mask.InBounds(t.q, t.r))
-                    mask[t.q, t.r] = true;
+                if (mask.InBounds(t.q, t.r)) mask[t.q, t.r] = true;
             }
 
-            // 2. 利用 HexBorderMeshBuilder 生成轮廓网格
-            // 关键参数：BorderMode.OuterOnly (只画最外圈)
+            // 关键：BorderMode.OuterOnly 只画外轮廓
             var mesh = HexBorderMeshBuilder.Build(
                 mask,
                 recipe.outerRadius,
-                recipe.borderYOffset + yOffset, // 抬高一点
+                recipe.borderYOffset + yOffset,
                 recipe.thickness,
                 width,
                 recipe.useOddROffset,
-                BorderMode.OuterOnly // ⭐ 核心：只要轮廓
+                BorderMode.OuterOnly,
+                grid.CenterOffset
             );
 
             _mf.sharedMesh = mesh;
-
-            // 3. 设置颜色
-            _mpb.SetColor("_BaseColor", outlineColor);
             _mpb.SetColor("_Color", outlineColor);
             _mr.SetPropertyBlock(_mpb);
         }

@@ -22,9 +22,9 @@ namespace Game.Battle
         public SkillBarController skillBarController;
 
         [Header("Visual Systems")]
-        public HexHighlighter highlighter;     // 用于清理旧高亮
-        public RangeOutlineDrawer rangeDrawer; // ⭐ 负责画技能范围轮廓 (请确保场景里有这个物体并拖入)
-        public BattleCursor gridCursor;        // ⭐ 负责画鼠标光标 (请确保场景里有这个物体并拖入)
+        public HexHighlighter highlighter;     // 用于清理 SelectionManager 的高亮
+        public RangeOutlineDrawer rangeDrawer; // ⭐ 负责画技能范围轮廓 (确保场景里有并拖入)
+        public BattleCursor gridCursor;        // ⭐ 负责画打击线框 (确保场景里有并拖入)
 
         [Header("Cursors (Mouse Icon)")]
         public Texture2D cursorTarget;
@@ -90,18 +90,20 @@ namespace Game.Battle
 
             // === 视觉处理 ===
 
-            // A. 清理 SelectionManager 留下的高亮 (比如选中的蓝色)
+            // A. 彻底清理 SelectionManager 留下的高亮 (选中蓝/移动绿/悬停黄)
             highlighter.ClearAll();
 
             // B. 显示范围轮廓 (Outline)
             if (rangeDrawer) rangeDrawer.Show(_validTiles);
 
-            // C. 初始化光标 (先隐藏，动鼠标时再显示)
+            // C. 初始化线框光标 (先隐藏)
             if (gridCursor) gridCursor.Hide();
+
+            // D. 初始化鼠标样式
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
-        // 2. 处理悬停 (只控制光标和线框，不碰 Highlighter)
+        // 2. 处理悬停
         void HandleHoverChanged(HexCoords? coords)
         {
             if (!IsTargeting) return;
@@ -175,7 +177,7 @@ namespace Game.Battle
             if (rangeDrawer) rangeDrawer.Hide();
             // 关闭光标
             if (gridCursor) gridCursor.Hide();
-            // 清理可能残留的高亮
+            // 清理
             highlighter.ClearAll();
 
             Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);

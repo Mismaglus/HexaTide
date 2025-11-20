@@ -122,7 +122,7 @@ namespace Game.Battle
 
             // === 居中偏移（只看存在的格子）===
             var worldBounds = HexBorderMeshBuilder.ComputeWorldBounds(mask, recipe.outerRadius, recipe.useOddROffset);
-            Vector3 centerOffset = new Vector3(worldBounds.center.x, 0f, worldBounds.center.z);
+            CenterOffset = new Vector3(worldBounds.center.x, 0f, worldBounds.center.z);
 
             // === 铺瓦片（只放存在的格子）===
             for (int r = 0; r < recipe.height; r++)
@@ -131,7 +131,7 @@ namespace Game.Battle
                 {
                     if (!mask[q, r]) continue;
 
-                    Vector3 pos = HexMetrics.GridToWorld(q, r, recipe.outerRadius, recipe.useOddROffset) - centerOffset;
+                    Vector3 pos = HexMetrics.GridToWorld(q, r, recipe.outerRadius, recipe.useOddROffset) - CenterOffset;
 
                     var go = new GameObject($"{CHILD_PREFIX_TILES}{r}_c{q}");
                     go.transform.SetParent(transform, false);
@@ -234,6 +234,19 @@ namespace Game.Battle
             }
         }
 
+        [SerializeField, HideInInspector] private Vector3 _serializedCenterOffset;
 
+        public Vector3 CenterOffset
+        {
+            get => _serializedCenterOffset;
+            private set => _serializedCenterOffset = value;
+        }
+
+        public Vector3 GetTileWorldPosition(HexCoords c)
+        {
+            if (recipe == null) return Vector3.zero;
+            Vector3 localPos = HexMetrics.GridToWorld(c.q, c.r, recipe.outerRadius, recipe.useOddROffset) - CenterOffset;
+            return transform.TransformPoint(localPos);
+        }
     }
 }

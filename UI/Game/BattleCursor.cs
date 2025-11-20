@@ -12,7 +12,7 @@ namespace Game.UI
 
         [Header("Settings")]
         public float yOffset = 0.1f;
-        public float animationSpeed = 15f;
+        public float animationSpeed = 20f;
 
         [Header("Colors")]
         public Color validColor = new Color(1f, 0.6f, 0f, 1f);   // 橙色
@@ -33,7 +33,7 @@ namespace Game.UI
         void SetupLineRenderer()
         {
             _line.positionCount = 7;
-            _line.useWorldSpace = false; // 线条点相对于自身，自身在世界空间移动
+            _line.useWorldSpace = false; // 点是局部的，物体跟随移动
             _line.loop = true;
             _line.startWidth = 0.15f;
             _line.endWidth = 0.15f;
@@ -52,19 +52,21 @@ namespace Game.UI
             _line.enabled = true;
 
             // 1. 计算网格局部坐标
-            Vector3 localPos = HexMetrics.GridToWorld(coords.q, coords.r, grid.recipe.outerRadius, grid.recipe.useOddROffset);
+            // Vector3 localPos = HexMetrics.GridToWorld(coords.q, coords.r, grid.recipe.outerRadius, grid.recipe.useOddROffset);
 
-            // ⭐ 关键修复：将局部坐标转换为世界坐标
-            // 这样即使 Grid 父物体有位移/旋转，光标也能对齐
-            _targetPos = grid.transform.TransformPoint(localPos);
-            _targetPos.y += yOffset;
+            // ⭐ 关键修复：局部转世界坐标
+            // 这会解决光标偏移到右上角的问题
+            // Vector3 worldPos = grid.transform.TransformPoint(localPos);
+            Vector3 worldPos = grid.GetTileWorldPosition(coords);
+
+            _targetPos = worldPos + new Vector3(0, yOffset, 0);
 
             // 2. 颜色
             Color c = isValid ? validColor : invalidColor;
             _line.startColor = c;
             _line.endColor = c;
 
-            // 3. 绘制 (本地坐标)
+            // 3. 绘制形状
             DrawHex(grid.recipe.outerRadius);
         }
 
@@ -77,12 +79,13 @@ namespace Game.UI
         void Update()
         {
             if (!_isVisible) return;
+            // 这里的 Lerp 速度调快一点，让跟随更跟手
             transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * animationSpeed);
         }
 
         void DrawHex(float radius)
         {
-            float r = radius * 0.95f; // 稍微内缩
+            float r = radius * 0.95f; // 稍微内缩，避免和格子边缘重叠
             for (int i = 0; i <= 6; i++)
             {
                 float angle_deg = 60 * i - 30;

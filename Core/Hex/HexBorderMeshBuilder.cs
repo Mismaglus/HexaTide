@@ -15,7 +15,8 @@ namespace Core.Hex
             bool[,] mask, int width, int height,
             float outerRadius, float yOffset, float tileThickness,
             float borderWidth, bool useOddROffset,
-            BorderMode mode
+            BorderMode mode,
+            Vector3? fixedCenterOffset = null
         )
         {
             var verts = new List<Vector3>();
@@ -25,8 +26,16 @@ namespace Core.Hex
             float y = yOffset + tileThickness * 0.5f;
 
             // 先计算用于居中的边界（只看存在的格子）
-            Bounds2D bounds = ComputeBounds(mask, width, height, outerRadius, useOddROffset);
-            Vector3 centerOffset = new Vector3(bounds.CenterX, 0f, bounds.CenterZ);
+            Vector3 centerOffset;
+            if (fixedCenterOffset.HasValue)
+            {
+                centerOffset = fixedCenterOffset.Value;
+            }
+            else
+            {
+                Bounds2D bounds = ComputeBounds(mask, width, height, outerRadius, useOddROffset);
+                centerOffset = new Vector3(bounds.CenterX, 0f, bounds.CenterZ);
+            }
 
             for (int r = 0; r < height; r++)
             {
@@ -153,12 +162,13 @@ namespace Core.Hex
             HexMask mask,
             float outerRadius, float yOffset, float tileThickness,
             float borderWidth, bool useOddROffset,
-            BorderMode mode
+            BorderMode mode,
+            Vector3? fixedCenterOffset = null
         )
         {
             // 复用原实现（避免重复逻辑）
             return Build(mask.ToArray(), mask.Width, mask.Height,
-                         outerRadius, yOffset, tileThickness, borderWidth, useOddROffset, mode);
+                         outerRadius, yOffset, tileThickness, borderWidth, useOddROffset, mode, fixedCenterOffset);
         }
 
         public readonly struct Bounds2D

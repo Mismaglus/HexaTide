@@ -41,7 +41,7 @@ namespace Game.Battle
             var controlService = PlayerControlService.Instance;
             if (controlService != null && !controlService.IsControlEnabled)
             {
-                highlighter.SetHover(null);
+                // highlighter.SetHover(null);
                 if (_lastHover.HasValue)
                 {
                     _lastHover = null;
@@ -56,7 +56,12 @@ namespace Game.Battle
             // UI 覆盖时不交互（可关）
             if (ignoreWhenPointerOverUI && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
-                highlighter.SetHover(null);
+                // highlighter.SetHover(null);
+                if (_lastHover.HasValue)
+                {
+                    _lastHover = null;
+                    OnHoverChanged?.Invoke(null);
+                }
                 return;
             }
 
@@ -64,7 +69,7 @@ namespace Game.Battle
             if (HexRaycaster.TryPick(cam, pos, out var go, out var tag, (int)raycastMask))
             {
                 var h = tag.Coords;
-                highlighter.SetHover(h);
+                // highlighter.SetHover(h);
                 if (!_lastHover.HasValue || !_lastHover.Value.Equals(h))
                 {
                     _lastHover = h;
@@ -80,7 +85,7 @@ namespace Game.Battle
             }
             else
             {
-                highlighter.SetHover(null);
+                // highlighter.SetHover(null);
                 if (_lastHover.HasValue)
                 {
                     _lastHover = null;

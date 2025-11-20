@@ -7,7 +7,7 @@ using Game.Units;
 using Game.Battle.Abilities;
 using Game.Battle.Actions;
 using Game.UI;
-using UnityEngine.InputSystem; // ⭐ 必须加上这个引用
+using UnityEngine.InputSystem;
 
 namespace Game.Battle
 {
@@ -21,6 +21,14 @@ namespace Game.Battle
         public ActionQueue actionQueue;
         public AbilityRunner abilityRunner;
         public SkillBarController skillBarController;
+
+        [Header("Visuals")]
+        public BattleCursor gridCursor; // ⭐ 拖入新做的光标物体
+
+        [Header("System Cursors")]
+        public Texture2D cursorTarget;
+        public Texture2D cursorInvalid;
+        public Vector2 cursorHotspot = Vector2.zero;
 
         // 运行时状态
         private Ability _currentAbility;
@@ -38,21 +46,30 @@ namespace Game.Battle
             if (!actionQueue) actionQueue = FindFirstObjectByType<ActionQueue>();
             if (!abilityRunner) abilityRunner = FindFirstObjectByType<AbilityRunner>();
             if (!skillBarController) skillBarController = FindFirstObjectByType<SkillBarController>();
+
+            if (!gridCursor) gridCursor = FindFirstObjectByType<BattleCursor>();
         }
 
         void OnEnable()
         {
             if (skillBarController) skillBarController.OnAbilitySelected += EnterTargetingMode;
-            if (input) input.OnTileClicked += HandleTileClicked;
+            if (input)
+            {
+                input.OnTileClicked += HandleTileClicked;
+                input.OnHoverChanged += HandleHoverChanged;
+            }
         }
 
         void OnDisable()
         {
             if (skillBarController) skillBarController.OnAbilitySelected -= EnterTargetingMode;
-            if (input) input.OnTileClicked -= HandleTileClicked;
+            if (input)
+            {
+                input.OnTileClicked -= HandleTileClicked;
+                input.OnHoverChanged -= HandleHoverChanged;
+            }
         }
 
-        // 1. 进入瞄准模式
         public void EnterTargetingMode(Ability ability)
         {
             var unit = selectionManager.SelectedUnit;
@@ -64,27 +81,51 @@ namespace Game.Battle
 
             Debug.Log($"[Targeting] 开始瞄准: {_currentAbility.name}");
 
+            // 1. 计算并显示绿底范围
             var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
-
             foreach (var t in rangeTiles) _validTiles.Add(t);
-
             highlighter.ApplyRange(_validTiles);
+
+            // 2. 初始化光标 (先隐藏，直到鼠标动)
+            if (gridCursor) gridCursor.Hide();
+            Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
-        // 2. 处理点击 (左键逻辑已经在 BattleHexInput -> HandleTileClicked 处理了，这里只负责逻辑判断)
+        void HandleHoverChanged(HexCoords? coords)
+        {
+            if (!IsTargeting) return;
+
+            if (coords.HasValue)
+            {
+                bool isValid = _validTiles.Contains(coords.Value);
+
+                // ⭐ 移动线框光标 (橙色=有效, 红色=无效)
+                if (gridCursor) gridCursor.Show(coords.Value, isValid);
+
+                // 鼠标指针样式
+                var cursorTex = isValid ? cursorTarget : cursorInvalid;
+                Cursor.SetCursor(cursorTex, cursorHotspot, CursorMode.Auto);
+            }
+            else
+            {
+                // 移出地图
+                if (gridCursor) gridCursor.Hide();
+                Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
+            }
+        }
+
         void HandleTileClicked(HexCoords coords)
         {
             if (!IsTargeting) return;
 
-            // 1. 校验射程
+            // 1. 射程校验 (软反馈)
             if (!_validTiles.Contains(coords))
             {
-                Debug.Log("[Targeting] 超出射程或无效区域，取消瞄准。");
-                CancelTargeting();
+                Debug.Log("[Targeting] 目标太远或无效 (右键取消)");
                 return;
             }
 
-            // 2. 校验目标
+            // 2. 目标逻辑校验
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
 
@@ -93,13 +134,12 @@ namespace Game.Battle
                 Caster = _caster,
                 Origin = _caster.GetComponent<Unit>().Coords
             };
-
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
 
             if (!_currentAbility.IsValidTarget(_caster, ctx))
             {
-                Debug.Log("[Targeting] 目标无效。");
+                Debug.Log("[Targeting] 目标类型无效");
                 return;
             }
 
@@ -112,22 +152,23 @@ namespace Game.Battle
             CancelTargeting();
         }
 
-        // 3. 退出瞄准
         public void CancelTargeting()
         {
             _currentAbility = null;
             _caster = null;
             _validTiles.Clear();
-            highlighter.ClearAll();
+
+            highlighter.ClearAll(); // 清除绿底
+            if (gridCursor) gridCursor.Hide(); // 隐藏线框
+
+            Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
             Debug.Log("[Targeting] 瞄准结束");
         }
 
-        // ⭐ 修复了这里的报错：使用新输入系统检测右键
         void Update()
         {
             if (IsTargeting)
             {
-                // 检查鼠标是否存在，且右键是否按下
                 if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                 {
                     CancelTargeting();

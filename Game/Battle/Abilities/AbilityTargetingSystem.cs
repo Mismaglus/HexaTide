@@ -15,17 +15,18 @@ namespace Game.Battle
     {
         [Header("Core References")]
         public BattleHexGrid grid;
-        public HexHighlighter highlighter;
         public SelectionManager selectionManager;
         public BattleHexInput input;
         public ActionQueue actionQueue;
         public AbilityRunner abilityRunner;
         public SkillBarController skillBarController;
 
-        [Header("Visuals")]
-        public BattleCursor gridCursor; // ⭐ 拖入新做的光标物体
+        [Header("Visual Systems")]
+        public HexHighlighter highlighter;     // 用于清理旧高亮
+        public RangeOutlineDrawer rangeDrawer; // ⭐ 负责画技能范围轮廓 (请确保场景里有这个物体并拖入)
+        public BattleCursor gridCursor;        // ⭐ 负责画鼠标光标 (请确保场景里有这个物体并拖入)
 
-        [Header("System Cursors")]
+        [Header("Cursors (Mouse Icon)")]
         public Texture2D cursorTarget;
         public Texture2D cursorInvalid;
         public Vector2 cursorHotspot = Vector2.zero;
@@ -47,6 +48,7 @@ namespace Game.Battle
             if (!abilityRunner) abilityRunner = FindFirstObjectByType<AbilityRunner>();
             if (!skillBarController) skillBarController = FindFirstObjectByType<SkillBarController>();
 
+            if (!rangeDrawer) rangeDrawer = FindFirstObjectByType<RangeOutlineDrawer>();
             if (!gridCursor) gridCursor = FindFirstObjectByType<BattleCursor>();
         }
 
@@ -70,6 +72,7 @@ namespace Game.Battle
             }
         }
 
+        // 1. 进入瞄准模式
         public void EnterTargetingMode(Ability ability)
         {
             var unit = selectionManager.SelectedUnit;
@@ -81,16 +84,24 @@ namespace Game.Battle
 
             Debug.Log($"[Targeting] 开始瞄准: {_currentAbility.name}");
 
-            // 1. 计算并显示绿底范围
+            // 计算范围
             var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
             foreach (var t in rangeTiles) _validTiles.Add(t);
-            highlighter.ApplyRange(_validTiles);
 
-            // 2. 初始化光标 (先隐藏，直到鼠标动)
+            // === 视觉处理 ===
+
+            // A. 清理 SelectionManager 留下的高亮 (比如选中的蓝色)
+            highlighter.ClearAll();
+
+            // B. 显示范围轮廓 (Outline)
+            if (rangeDrawer) rangeDrawer.Show(_validTiles);
+
+            // C. 初始化光标 (先隐藏，动鼠标时再显示)
             if (gridCursor) gridCursor.Hide();
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
+        // 2. 处理悬停 (只控制光标和线框，不碰 Highlighter)
         void HandleHoverChanged(HexCoords? coords)
         {
             if (!IsTargeting) return;
@@ -99,10 +110,10 @@ namespace Game.Battle
             {
                 bool isValid = _validTiles.Contains(coords.Value);
 
-                // ⭐ 移动线框光标 (橙色=有效, 红色=无效)
+                // A. 移动线框光标 (BattleCursor 会自己变色: 橙/红)
                 if (gridCursor) gridCursor.Show(coords.Value, isValid);
 
-                // 鼠标指针样式
+                // B. 切换鼠标图标
                 var cursorTex = isValid ? cursorTarget : cursorInvalid;
                 Cursor.SetCursor(cursorTex, cursorHotspot, CursorMode.Auto);
             }
@@ -114,18 +125,19 @@ namespace Game.Battle
             }
         }
 
+        // 3. 处理点击
         void HandleTileClicked(HexCoords coords)
         {
             if (!IsTargeting) return;
 
-            // 1. 射程校验 (软反馈)
+            // 范围校验
             if (!_validTiles.Contains(coords))
             {
-                Debug.Log("[Targeting] 目标太远或无效 (右键取消)");
+                Debug.Log("[Targeting] 目标无效 (不在范围内)");
                 return;
             }
 
-            // 2. 目标逻辑校验
+            // 目标校验
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
 
@@ -143,7 +155,7 @@ namespace Game.Battle
                 return;
             }
 
-            // 3. 执行
+            // 执行
             Debug.Log($"[Targeting] 释放技能 -> {coords}");
             var action = new AbilityAction(_currentAbility, ctx, abilityRunner);
             actionQueue.Enqueue(action);
@@ -152,14 +164,19 @@ namespace Game.Battle
             CancelTargeting();
         }
 
+        // 4. 退出
         public void CancelTargeting()
         {
             _currentAbility = null;
             _caster = null;
             _validTiles.Clear();
 
-            highlighter.ClearAll(); // 清除绿底
-            if (gridCursor) gridCursor.Hide(); // 隐藏线框
+            // 关闭轮廓
+            if (rangeDrawer) rangeDrawer.Hide();
+            // 关闭光标
+            if (gridCursor) gridCursor.Hide();
+            // 清理可能残留的高亮
+            highlighter.ClearAll();
 
             Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
             Debug.Log("[Targeting] 瞄准结束");

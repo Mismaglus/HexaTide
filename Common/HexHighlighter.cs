@@ -11,9 +11,9 @@ namespace Game.Common
         public Game.Battle.BattleHexGrid grid;
 
         [Header("Colors")]
-        public Color hoverColor = new Color(0.95f, 0.95f, 0.25f, 1f);    // 黄 (普通模式用)
-        public Color selectedColor = new Color(0.25f, 0.8f, 1.0f, 1f);   // 蓝 (选中单位)
-        public Color rangeColor = new Color(0.0f, 1.0f, 0.4f, 0.3f);     // ? 绿 (技能范围底色)
+        public Color hoverColor = new Color(0.95f, 0.95f, 0.25f, 0.5f);    // 黄 (移动模式悬停)
+        public Color selectedColor = new Color(0.25f, 0.8f, 1.0f, 0.5f);   // 蓝 (选中单位)
+        public Color rangeColor = new Color(0.0f, 1.0f, 0.4f, 0.3f);     // ? 绿 (移动范围底色)
 
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
@@ -26,9 +26,10 @@ namespace Game.Common
         struct Slot { public MeshRenderer mr; public int colorPropId; }
         readonly Dictionary<(int q, int r), Slot> _slots = new();
 
+        // States
         HexCoords? _hover;
         HexCoords? _selected;
-        readonly HashSet<HexCoords> _range = new();
+        readonly HashSet<HexCoords> _range = new(); // 用于存储移动范围
 
         MaterialPropertyBlock _mpb;
         uint _lastGridVersion;
@@ -68,26 +69,41 @@ namespace Game.Common
             }
         }
 
-        // API
-        public void SetHover(HexCoords? c) { var o = _hover; _hover = c; revertPaintHelper(o); Repaint(_hover); }
-        public void SetSelected(HexCoords? c) { var o = _selected; _selected = c; revertPaintHelper(o); Repaint(_selected); }
+        // === API Methods (供 SelectionManager 调用) ===
+
+        public void SetHover(HexCoords? c)
+        {
+            var o = _hover; _hover = c; revertPaintHelper(o); Repaint(_hover);
+        }
+
+        public void SetSelected(HexCoords? c)
+        {
+            var o = _selected; _selected = c; revertPaintHelper(o); Repaint(_selected);
+        }
+
+        // ? 恢复了这个方法，SelectionManager 不会再报错了
         public void ApplyRange(IEnumerable<HexCoords> c)
         {
             var old = new HashSet<HexCoords>(_range);
             _range.Clear();
             if (c != null) foreach (var x in c) _range.Add(x);
+
             foreach (var x in old) if (!_range.Contains(x)) revertPaintHelper(x);
             foreach (var x in _range) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
+
         public void ClearAll()
         {
             var t = new HashSet<HexCoords>();
             if (_hover.HasValue) t.Add(_hover.Value);
             if (_selected.HasValue) t.Add(_selected.Value);
             foreach (var x in _range) t.Add(x);
+
             _hover = null; _selected = null; _range.Clear();
             foreach (var x in t) ClearPaint(x);
         }
+
+        // === Painting Logic ===
 
         void revertPaintHelper(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
         void Repaint(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
@@ -104,40 +120,32 @@ namespace Game.Common
             if (_mpb == null) _mpb = new MaterialPropertyBlock();
             if (!_slots.TryGetValue((q, r), out var slot) || !slot.mr) return;
 
-            bool isHover = _hover.HasValue && _hover.Value.q == q && _hover.Value.r == r;
-            bool isSelected = _selected.HasValue && _selected.Value.q == q && _selected.Value.r == r;
-            bool inRange = _range.Contains(new HexCoords(q, r));
-
-            // 判断是否在瞄准模式 (Range不为空)
-            bool isTargeting = _range.Count > 0;
+            var coord = new HexCoords(q, r);
+            bool isHover = _hover.HasValue && _hover.Value.Equals(coord);
+            bool isSelected = _selected.HasValue && _selected.Value.Equals(coord);
+            bool inRange = _range.Contains(coord);
 
             Color finalColor = Color.clear;
             bool shouldPaint = false;
 
-            if (isTargeting)
+            // 简单优先级：Hover > Selected > Range
+            // 注意：这套逻辑现在只服务于“移动模式”
+            // “技能模式”的高亮由 BattleCursor 和 RangeOutlineDrawer 负责，不走这里
+
+            if (isHover)
             {
-                // === 瞄准模式：只显示底色 ===
-                // 鼠标悬停不显示黄色，而是完全交给线框光标 (BattleCursor) 去处理
-                // 这样底下的绿格子就不会因为鼠标移上去而变色
-                if (inRange)
-                {
-                    finalColor = rangeColor * rangeIntensity;
-                    shouldPaint = true;
-                }
+                finalColor = hoverColor * hoverIntensity;
+                shouldPaint = true;
             }
-            else
+            else if (isSelected)
             {
-                // === 普通模式：显示黄色悬停 ===
-                if (isHover)
-                {
-                    finalColor = hoverColor * hoverIntensity;
-                    shouldPaint = true;
-                }
-                else if (isSelected)
-                {
-                    finalColor = selectedColor * selectedIntensity;
-                    shouldPaint = true;
-                }
+                finalColor = selectedColor * selectedIntensity;
+                shouldPaint = true;
+            }
+            else if (inRange)
+            {
+                finalColor = rangeColor * rangeIntensity;
+                shouldPaint = true;
             }
 
             if (shouldPaint)
@@ -158,6 +166,10 @@ namespace Game.Common
             }
         }
 
-        public void ClearPaint(HexCoords c) { /* ... */ if (_slots.TryGetValue((c.q, c.r), out var slot) && slot.mr) slot.mr.SetPropertyBlock(null); }
+        public void ClearPaint(HexCoords c)
+        {
+            if (_slots.TryGetValue((c.q, c.r), out var slot) && slot.mr)
+                slot.mr.SetPropertyBlock(null);
+        }
     }
 }

@@ -1,6 +1,6 @@
 using UnityEngine;
 using Core.Hex;
-using Game.Battle; // 引用 BattleHexGrid
+using Game.Battle;
 
 namespace Game.UI
 {
@@ -8,15 +8,15 @@ namespace Game.UI
     public class BattleCursor : MonoBehaviour
     {
         [Header("Refs")]
-        public BattleHexGrid grid; // 需要读取网格半径配置
+        public BattleHexGrid grid;
 
         [Header("Settings")]
-        public float yOffset = 0.1f; // 稍微浮在地面上方
-        public float animationSpeed = 10f; // 移动平滑度
+        public float yOffset = 0.1f;
+        public float animationSpeed = 15f;
 
         [Header("Colors")]
-        public Color validColor = new Color(1f, 0.6f, 0f, 1f); // 橙色 (有效目标)
-        public Color invalidColor = new Color(1f, 0.2f, 0.2f, 0.5f); // 红色 (无效)
+        public Color validColor = new Color(1f, 0.6f, 0f, 1f);   // 橙色
+        public Color invalidColor = new Color(1f, 0.2f, 0.2f, 0.5f); // 红色
 
         private LineRenderer _line;
         private Vector3 _targetPos;
@@ -26,21 +26,22 @@ namespace Game.UI
         {
             _line = GetComponent<LineRenderer>();
             SetupLineRenderer();
-
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
-
-            // 初始隐藏
             Hide();
         }
 
         void SetupLineRenderer()
         {
-            _line.positionCount = 7; // 六边形闭环需要7个点
-            _line.useWorldSpace = false; // 本地坐标，方便移动父物体
+            _line.positionCount = 7;
+            _line.useWorldSpace = false; // 线条点相对于自身，自身在世界空间移动
             _line.loop = true;
             _line.startWidth = 0.15f;
             _line.endWidth = 0.15f;
-            _line.material = new Material(Shader.Find("Sprites/Default")); // 使用简单材质
+            _line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _line.receiveShadows = false;
+
+            var shader = Shader.Find("Sprites/Default");
+            if (shader) _line.material = new Material(shader);
         }
 
         public void Show(HexCoords coords, bool isValid)
@@ -50,16 +51,20 @@ namespace Game.UI
             _isVisible = true;
             _line.enabled = true;
 
-            // 1. 计算目标位置
-            _targetPos = HexMetrics.GridToWorld(coords.q, coords.r, grid.recipe.outerRadius, grid.recipe.useOddROffset);
+            // 1. 计算网格局部坐标
+            Vector3 localPos = HexMetrics.GridToWorld(coords.q, coords.r, grid.recipe.outerRadius, grid.recipe.useOddROffset);
+
+            // ⭐ 关键修复：将局部坐标转换为世界坐标
+            // 这样即使 Grid 父物体有位移/旋转，光标也能对齐
+            _targetPos = grid.transform.TransformPoint(localPos);
             _targetPos.y += yOffset;
 
-            // 2. 设置颜色
+            // 2. 颜色
             Color c = isValid ? validColor : invalidColor;
             _line.startColor = c;
             _line.endColor = c;
 
-            // 3. 重新生成网格形状 (以防半径变化)
+            // 3. 绘制 (本地坐标)
             DrawHex(grid.recipe.outerRadius);
         }
 
@@ -72,19 +77,18 @@ namespace Game.UI
         void Update()
         {
             if (!_isVisible) return;
-            // 平滑移动到目标格子
             transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * animationSpeed);
         }
 
         void DrawHex(float radius)
         {
-            // 生成尖顶六边形的6个角点 (从本地坐标原点)
+            float r = radius * 0.95f; // 稍微内缩
             for (int i = 0; i <= 6; i++)
             {
                 float angle_deg = 60 * i - 30;
                 float angle_rad = Mathf.Deg2Rad * angle_deg;
-                float x = radius * Mathf.Cos(angle_rad);
-                float z = radius * Mathf.Sin(angle_rad);
+                float x = r * Mathf.Cos(angle_rad);
+                float z = r * Mathf.Sin(angle_rad);
                 _line.SetPosition(i, new Vector3(x, 0, z));
             }
         }

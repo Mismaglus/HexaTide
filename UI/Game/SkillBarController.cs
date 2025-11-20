@@ -1,6 +1,7 @@
 using UnityEngine;
 using Game.Battle; // 引用 SelectionManager, BattleUnit, BattleController
 using Game.Units;  // 引用 Unit
+using Game.Battle.Abilities;
 
 namespace Game.UI
 {
@@ -11,7 +12,7 @@ namespace Game.UI
 
         // 私有变量，等待 Initialize 注入
         private SelectionManager _selectionManager;
-
+        public event System.Action<Ability> OnAbilitySelected;
         // 缓存当前选中的单位
         private Unit _currentUnit;
 
@@ -50,6 +51,12 @@ namespace Game.UI
             {
                 Debug.LogError("[SkillBarController] 找不到 SelectionManager，技能栏无法工作！");
             }
+
+            if (populator != null)
+            {
+                populator.OnSkillClicked -= HandleSkillClicked;
+                populator.OnSkillClicked += HandleSkillClicked;
+            }
         }
 
         void OnDestroy()
@@ -60,34 +67,57 @@ namespace Game.UI
 
         // === 下面的逻辑保持不变 ===
 
+        // SkillBarController.cs
+
         void HandleSelectionChanged(Unit unit)
         {
             _currentUnit = unit;
 
-            // 1. 基础检查：没选中、没组件、或者是敌人 -> 清空
+            // 1. 基础检查：没选中、没组件 -> 依然清空
             if (unit == null || !unit.TryGetComponent<BattleUnit>(out var battleUnit))
             {
                 ClearSkillBar();
                 return;
             }
 
-            // ⭐ 新增判断：如果不是玩家可控单位，也清空技能栏
-            // (这样选中敌人时，技能栏会变空，避免误导玩家)
-            if (!battleUnit.IsPlayerControlled)
-            {
-                ClearSkillBar();
-                return;
-            }
+            // ⭐ 修改逻辑：不再 return，而是设置状态
+            bool isEnemy = !battleUnit.IsPlayerControlled;
 
-            // 2. 是自己人 -> 显示技能
             if (populator != null)
             {
+                // 2. 告诉 UI：如果是敌人，就锁定 (变灰)
+                populator.SetLockedState(isEnemy);
+
+                // 3. 无论敌我，都填入数据！
+                // (这样玩家就能看到敌人的技能图标了)
                 populator.abilities.Clear();
                 if (battleUnit.abilities != null)
                 {
                     populator.abilities.AddRange(battleUnit.abilities);
                 }
+
                 populator.Populate();
+            }
+        }
+        void HandleSkillClicked(int index)
+        {
+            // 如果选中的是敌对单位，或者索引无效
+            if (_currentUnit == null || !_currentUnit.IsPlayerControlled)
+            {
+                // 🔇 这里可以播放一个“Error”音效
+                Debug.Log("Cannot use enemy skills!");
+                return;
+            }
+
+            // 从 BattleUnit 获取对应索引的技能
+            var battleUnit = _currentUnit.GetComponent<BattleUnit>();
+            if (battleUnit != null && index < battleUnit.abilities.Count)
+            {
+                var ability = battleUnit.abilities[index];
+                Debug.Log($"选择了技能: {ability.name}");
+
+                // 广播事件：有人想用这个技能！
+                OnAbilitySelected?.Invoke(ability);
             }
         }
 
@@ -95,6 +125,7 @@ namespace Game.UI
         {
             if (populator != null)
             {
+                populator.SetLockedState(false); // 恢复默认
                 populator.abilities.Clear();
                 populator.Populate();
             }

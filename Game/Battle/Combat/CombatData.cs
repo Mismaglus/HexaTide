@@ -6,10 +6,10 @@ namespace Game.Battle.Combat
     [Serializable]
     public struct ScalingMatrix
     {
-        [Tooltip("Strength scaling")] public float Str;
-        [Tooltip("Dexterity scaling")] public float Dex;
-        [Tooltip("Intelligence scaling")] public float Int;
-        [Tooltip("Faith scaling")] public float Faith;
+        public float Str;
+        public float Dex;
+        public float Int;
+        public float Faith;
 
         public float Evaluate(Game.Units.UnitAttributes.CoreAttributes stats)
         {
@@ -20,26 +20,20 @@ namespace Game.Battle.Combat
     [Serializable]
     public struct DamageConfig
     {
-        [Header("Physical Component")]
+        [Header("Physical")]
         public int basePhysical;
         public ScalingMatrix physScaling;
 
-        [Header("Magical Component")]
+        [Header("Magical")]
         public int baseMagical;
         public ScalingMatrix magScaling;
 
-        [Header("Global Settings")]
-        [Tooltip("0.05 means +/- 5% variance")]
+        [Header("Settings")]
         public float variance;
 
         public static DamageConfig Default()
         {
-            return new DamageConfig
-            {
-                basePhysical = 10,
-                physScaling = new ScalingMatrix { Str = 1.0f },
-                variance = 0.05f
-            };
+            return new DamageConfig { basePhysical = 10, variance = 0.05f };
         }
     }
 
@@ -48,16 +42,10 @@ namespace Game.Battle.Combat
         public bool isHit;
         public bool isCrit;
         public int finalDamage;
-        public int rawPhysical;
-        public int rawMagical;
-        public int dmgPhysical;
-        public int dmgMagical;
 
         public string ToLog()
         {
-            if (!isHit) return "MISS";
-            string critStr = isCrit ? " [CRIT!]" : "";
-            return $"{finalDamage} (P:{dmgPhysical} + M:{dmgMagical}){critStr}";
+            return isHit ? $"{finalDamage}{(isCrit ? " CRIT!" : "")}" : "MISS";
         }
     }
 }

@@ -8,8 +8,6 @@ namespace Game.Battle.Abilities
     [CreateAssetMenu(menuName = "Battle/Effects/Damage")]
     public class DamageEffect : AbilityEffect
     {
-        // ⭐ 使用新的 Config 结构，支持混伤和独立Scaling
-        [Header("Damage Configuration")]
         public DamageConfig config = DamageConfig.Default();
 
         public override IEnumerator Apply(BattleUnit caster, Ability ability, AbilityContext ctx)
@@ -18,10 +16,10 @@ namespace Game.Battle.Abilities
             {
                 if (target == null) continue;
 
-                // 1. 计算
-                CombatResult result = CombatCalculator.ResolveAttack(caster, target, config);
+                // 计算
+                var result = CombatCalculator.ResolveAttack(caster, target, config);
 
-                // 2. 结算
+                // 结算
                 if (result.isHit)
                 {
                     if (target.TryGetComponent<UnitAttributes>(out var attrs))
@@ -29,23 +27,14 @@ namespace Game.Battle.Abilities
                         attrs.Core.HP = Mathf.Max(0, attrs.Core.HP - result.finalDamage);
                     }
 
-                    if (target.TryGetComponent<UnitHitReaction>(out var hitReaction))
-                    {
-                        hitReaction.Play();
-                    }
-                    else
-                    {
-                        var anim = target.GetComponentInChildren<Animator>(true);
-                        if (anim) anim.SetTrigger("GetHit");
-                    }
+                    if (target.TryGetComponent<UnitHitReaction>(out var react)) react.Play();
+                    else target.GetComponentInChildren<Animator>()?.SetTrigger("GetHit");
                 }
 
-                // 3. Debug Log (后期替换为 UI 飘字)
-                string logColor = result.isHit ? (result.isCrit ? "red" : "white") : "grey";
-                string msg = result.isHit ? $"-{result.finalDamage}" : "MISS";
-                if (result.isCrit) msg += "!";
-
-                Debug.Log($"<color={logColor}><b>{msg}</b></color> on {target.name} ({result.ToLog()})");
+                // Log (带颜色)
+                string color = result.isHit ? "white" : "grey";
+                if (result.isCrit) color = "red";
+                Debug.Log($"<color={color}>[Damage] {result.ToLog()} on {target.name}</color>");
 
                 yield return new WaitForSeconds(0.1f);
             }

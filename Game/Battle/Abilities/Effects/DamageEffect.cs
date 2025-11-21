@@ -1,55 +1,50 @@
-// Script/Game/Battle/Abilities/Effects/DamageEffect.cs
 using System.Collections;
-using Game.Units;
 using UnityEngine;
+using Game.Units;
+using Game.Battle.Combat;
 
 namespace Game.Battle.Abilities
 {
     [CreateAssetMenu(menuName = "Battle/Effects/Damage")]
     public class DamageEffect : AbilityEffect
     {
-        public int baseDamage = 10;
+        [Header("Damage Configuration")]
+        public DamageConfig config = DamageConfig.Default();
 
         public override IEnumerator Apply(BattleUnit caster, Ability ability, AbilityContext ctx)
         {
-            foreach (var u in ctx.TargetUnits)
+            foreach (var target in ctx.TargetUnits)
             {
-                if (u == null) continue;
+                if (target == null) continue;
 
-                // TODO: replace with your own HP component
-                if (u.TryGetComponent<DemoHP>(out var hp))
-                {
-                    hp.ApplyDamage(baseDamage);
-                }
+                CombatResult result = CombatCalculator.ResolveAttack(caster, target, config);
 
-                if (u.TryGetComponent<UnitHitReaction>(out var hitReaction))
+                if (result.isHit)
                 {
-                    hitReaction.Play();
-                }
-                else
-                {
-                    var anim = u.GetComponentInChildren<Animator>(true);
-                    if (anim != null)
+                    if (target.TryGetComponent<UnitAttributes>(out var attrs))
                     {
-                        anim.SetTrigger("GetHit");
+                        attrs.Core.HP = Mathf.Max(0, attrs.Core.HP - result.finalDamage);
+                    }
+
+                    if (target.TryGetComponent<UnitHitReaction>(out var hitReaction))
+                    {
+                        hitReaction.Play();
+                    }
+                    else
+                    {
+                        var anim = target.GetComponentInChildren<Animator>(true);
+                        if (anim) anim.SetTrigger("GetHit");
                     }
                 }
 
-                yield return null; // frame break to allow VFX timing
+                string logColor = result.isHit ? (result.isCrit ? "red" : "white") : "grey";
+                string msg = result.isHit ? $"-{result.finalDamage}" : "MISS";
+                if (result.isCrit) msg += "!";
+
+                Debug.Log($"<color={logColor}><b>{msg}</b></color> on {target.name} ({result.ToLog()})");
+
+                yield return new WaitForSeconds(0.1f);
             }
-        }
-    }
-
-    // Demo: simple HP holder (replace with your real stat system)
-    public class DemoHP : MonoBehaviour
-    {
-        public int MaxHP = 100;
-        public int CurHP = 100;
-
-        public void ApplyDamage(int dmg)
-        {
-            CurHP = Mathf.Max(0, CurHP - Mathf.Max(0, dmg));
-            // death check / events here
         }
     }
 }

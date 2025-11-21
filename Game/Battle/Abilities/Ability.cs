@@ -1,11 +1,10 @@
-// Script/Game/Battle/Abilities/Ability.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace Game.Battle.Abilities
 {
-    public enum TargetShape { Self, Single, Disk, Ring, Line } // extend later
+    public enum TargetShape { Self, Single, Disk, Ring, Line }
     public enum TargetFaction { Any, Ally, Enemy, SelfOnly }
     public enum AbilityType { Physical, Magical, Mixed }
 
@@ -14,12 +13,11 @@ namespace Game.Battle.Abilities
         [Header("Identity")]
         public string abilityId;
         public string displayName;
-        [Tooltip("Icon sprite shown for this ability in UI.")]
         public Sprite icon;
 
         [Header("Costs & Cooldown")]
         public int apCost = 1;
-        [Min(0)] public int mpCost = 0; // ⭐ 新增：MP 消耗字段
+        [Min(0)] public int mpCost = 0; // ⭐ 新增：MP消耗
         public int cooldownTurns = 0;
 
         [Header("Targeting")]
@@ -30,41 +28,30 @@ namespace Game.Battle.Abilities
         public bool requiresLoS = false;
 
         [Header("Classification")]
-        [Tooltip("Physical attacks draw on Armor while magical attacks draw on Ward.")]
         public AbilityType abilityType = AbilityType.Physical;
 
         [Header("Effects")]
         public List<AbilityEffect> effects = new();
 
         [Header("Animation")]
-        [Tooltip("Animator trigger fired on the caster when this ability executes.")]
         public string animTrigger = string.Empty;
-        [Tooltip("Rotate the caster to face the first target before playing the animation.")]
         public bool faceTarget = true;
-        [Tooltip("Delay between triggering the animation and applying effects.")]
         public float preWindupSeconds = 0.2f;
-        [Tooltip("Delay after all effects are applied (e.g., recovery).")]
         public float postRecoverSeconds = 0.2f;
-        [Tooltip("If enabled, the runner waits for the specified animator state (name or tag) to finish before ending the ability.")]
         public bool waitForAnimCompletion = true;
-        [Tooltip("Animator layer index used when waiting for completion.")]
         public int animLayerIndex = 0;
-        [Tooltip("Animator state name (use full path if needed). Leave empty to rely on tag.")]
         public string animStateName = string.Empty;
-        [Tooltip("Animator state tag watched when waiting for completion (ignored if state name is provided).")]
         public string animStateTag = string.Empty;
-        [Tooltip("Maximum time (seconds) to wait before giving up when monitoring animation completion.")]
         public float animWaitTimeout = 5f;
 
-        // ⭐ 更新：检查 AP 和 MP 是否都足够
         public virtual bool CanUse(BattleUnit caster)
         {
             if (caster == null) return false;
 
-            // 检查 AP
+            // Check AP
             if (caster.CurAP < apCost) return false;
 
-            // 检查 MP (通过 UnitAttributes)
+            // ⭐ Check MP
             if (mpCost > 0)
             {
                 if (caster.Attributes == null) return false;
@@ -84,7 +71,6 @@ namespace Game.Battle.Abilities
             caster.TrySpendAP(apCost);
             if (mpCost > 0) caster.TrySpendMP(mpCost);
 
-            // VFX/SFX hooks could be placed here or inside runner.PerformEffects
             yield return runner.PerformEffects(caster, this, ctx, effects);
         }
     }

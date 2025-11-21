@@ -3,22 +3,14 @@ using UnityEngine;
 
 namespace Game.Battle.Combat
 {
-    /// <summary>
-    /// 定义一组属性加成系数
-    /// </summary>
     [Serializable]
     public struct ScalingMatrix
     {
-        [Tooltip("Strength scaling factor")]
-        public float Str;
-        [Tooltip("Dexterity scaling factor")]
-        public float Dex;
-        [Tooltip("Intelligence scaling factor")]
-        public float Int;
-        [Tooltip("Faith scaling factor")]
-        public float Faith;
+        [Tooltip("Strength scaling")] public float Str;
+        [Tooltip("Dexterity scaling")] public float Dex;
+        [Tooltip("Intelligence scaling")] public float Int;
+        [Tooltip("Faith scaling")] public float Faith;
 
-        // 方便的计算方法
         public float Evaluate(Game.Units.UnitAttributes.CoreAttributes stats)
         {
             return (stats.Str * Str) + (stats.Dex * Dex) + (stats.Int * Int) + (stats.Faith * Faith);
@@ -30,11 +22,11 @@ namespace Game.Battle.Combat
     {
         [Header("Physical Component")]
         public int basePhysical;
-        public ScalingMatrix physScaling; // 物理部分的专属加成
+        public ScalingMatrix physScaling;
 
         [Header("Magical Component")]
         public int baseMagical;
-        public ScalingMatrix magScaling;  // 魔法部分的专属加成
+        public ScalingMatrix magScaling;
 
         [Header("Global Settings")]
         [Tooltip("0.05 means +/- 5% variance")]
@@ -45,7 +37,7 @@ namespace Game.Battle.Combat
             return new DamageConfig
             {
                 basePhysical = 10,
-                physScaling = new ScalingMatrix { Str = 1.0f }, // 默认物理吃力量
+                physScaling = new ScalingMatrix { Str = 1.0f },
                 variance = 0.05f
             };
         }
@@ -56,11 +48,10 @@ namespace Game.Battle.Combat
         public bool isHit;
         public bool isCrit;
         public int finalDamage;
-
         public int rawPhysical;
         public int rawMagical;
-        public int dmgPhysical; // 减伤后的物理
-        public int dmgMagical;  // 减伤后的魔法
+        public int dmgPhysical;
+        public int dmgMagical;
 
         public string ToLog()
         {

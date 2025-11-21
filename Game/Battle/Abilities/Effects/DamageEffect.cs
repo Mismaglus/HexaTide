@@ -8,6 +8,7 @@ namespace Game.Battle.Abilities
     [CreateAssetMenu(menuName = "Battle/Effects/Damage")]
     public class DamageEffect : AbilityEffect
     {
+        // ⭐ 使用新的 Config 结构，支持混伤和独立Scaling
         [Header("Damage Configuration")]
         public DamageConfig config = DamageConfig.Default();
 
@@ -17,8 +18,10 @@ namespace Game.Battle.Abilities
             {
                 if (target == null) continue;
 
+                // 1. 计算
                 CombatResult result = CombatCalculator.ResolveAttack(caster, target, config);
 
+                // 2. 结算
                 if (result.isHit)
                 {
                     if (target.TryGetComponent<UnitAttributes>(out var attrs))
@@ -37,6 +40,7 @@ namespace Game.Battle.Abilities
                     }
                 }
 
+                // 3. Debug Log (后期替换为 UI 飘字)
                 string logColor = result.isHit ? (result.isCrit ? "red" : "white") : "grey";
                 string msg = result.isHit ? $"-{result.finalDamage}" : "MISS";
                 if (result.isCrit) msg += "!";

@@ -1,3 +1,4 @@
+// Script/Game/Battle/Abilities/Ability.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -18,7 +19,7 @@ namespace Game.Battle.Abilities
 
         [Header("Costs & Cooldown")]
         public int apCost = 1;
-        [Min(0)] public int mpCost = 0; // ⭐ 新增：MP 消耗
+        [Min(0)] public int mpCost = 0; // ⭐ 新增：MP 消耗字段
         public int cooldownTurns = 0;
 
         [Header("Targeting")]
@@ -66,7 +67,6 @@ namespace Game.Battle.Abilities
             // 检查 MP (通过 UnitAttributes)
             if (mpCost > 0)
             {
-                // BattleUnit 应该有 Attributes 引用
                 if (caster.Attributes == null) return false;
                 if (caster.Attributes.Core.MP < mpCost) return false;
             }
@@ -78,12 +78,11 @@ namespace Game.Battle.Abilities
 
         public virtual IEnumerator Execute(BattleUnit caster, AbilityContext ctx, AbilityRunner runner)
         {
-            // 双重检查，防止边缘情况
             if (!CanUse(caster) || !IsValidTarget(caster, ctx)) yield break;
 
             // ⭐ 消耗资源
             caster.TrySpendAP(apCost);
-            caster.TrySpendMP(mpCost); // 调用 BattleUnit 里写好的扣蓝逻辑
+            if (mpCost > 0) caster.TrySpendMP(mpCost);
 
             // VFX/SFX hooks could be placed here or inside runner.PerformEffects
             yield return runner.PerformEffects(caster, this, ctx, effects);

@@ -15,38 +15,22 @@ namespace Game.UI
 
         [Header("Stats Section")]
         public GenericBarController apBarController;
-        public GenericBarController mpBarController;
+        public GenericBarController mpBarController; // 🔵 确保这个已连接
 
         [Header("System")]
-        // 移除在这里的自动查找，等待注入
         public SelectionManager selectionManager;
         public GameObject contentRoot;
 
         private Unit _currentUnit;
 
-        // 删除 void Awake() {...} 
-        // 删除 void OnEnable() {...} 
-        // 因为如果不通过 Initialize 注入，OnEnable 里 selectionManager 也是空的
-
-        // ⭐ 新增初始化方法
         public void Initialize(SelectionManager manager)
         {
             selectionManager = manager;
-
             if (selectionManager != null)
             {
-                // 1. 订阅事件
                 selectionManager.OnSelectedUnitChanged -= HandleSelectionChanged;
                 selectionManager.OnSelectedUnitChanged += HandleSelectionChanged;
-
-                // 2. 立即刷新一次（以防已经选中了什么）
                 HandleSelectionChanged(selectionManager.SelectedUnit);
-
-                Debug.Log("[UnitFrameUI] 初始化成功，已连接 SelectionManager");
-            }
-            else
-            {
-                Debug.LogError("[UnitFrameUI] 收到了空的 SelectionManager！");
             }
         }
 
@@ -64,9 +48,6 @@ namespace Game.UI
             }
         }
 
-        // ... 下面的 HandleSelectionChanged 和 RefreshDynamicValues 保持不变 ...
-        // (为了节省篇幅，这里不重复粘贴，请保留你刚才修改过的反转血条逻辑)
-
         void HandleSelectionChanged(Unit unit)
         {
             _currentUnit = unit;
@@ -82,20 +63,29 @@ namespace Game.UI
         {
             if (_currentUnit == null) return;
 
+            // 1. HP 更新
             if (_currentUnit.TryGetComponent<UnitAttributes>(out var attrs))
             {
-                float currentHP = attrs.Core.HP;
+                // HP (红条：受伤量)
+                float curHP = attrs.Core.HP;
                 float maxHP = attrs.Core.HPMax;
-                float damage = maxHP - currentHP; // 你的反转逻辑
+                if (hpSlider != null) { hpSlider.maxValue = maxHP; hpSlider.value = maxHP - curHP; }
+                if (hpText != null) { hpText.text = $"{curHP}/{maxHP}"; }
 
-                if (hpSlider != null) { hpSlider.maxValue = maxHP; hpSlider.value = damage; }
-                if (hpText != null) { hpText.text = $"{currentHP}/{maxHP}"; }
-            }
+                // ⭐ MP (蓝条：剩余量)
+                // 确保这里连接了 attrs.Core.MP
+                if (mpBarController != null)
+                {
+                    mpBarController.MaxValue = attrs.Core.MPMax;
+                    mpBarController.CurrentValue = attrs.Core.MP;
+                }
 
-            if (apBarController != null && _currentUnit.TryGetComponent<BattleUnit>(out var bu))
-            {
-                apBarController.MaxValue = bu.MaxAP;
-                apBarController.CurrentValue = bu.CurAP;
+                // ⭐ AP 更新 (从 Attributes 读取)
+                if (apBarController != null)
+                {
+                    apBarController.MaxValue = attrs.Core.MaxAP;
+                    apBarController.CurrentValue = attrs.Core.CurrentAP;
+                }
             }
         }
     }

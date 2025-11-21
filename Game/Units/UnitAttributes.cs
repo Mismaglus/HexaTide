@@ -3,10 +3,6 @@ using UnityEngine;
 
 namespace Game.Units
 {
-    /// <summary>
-    /// Stores all gameplay-related attributes for a unit in a single component so that
-    /// balancing can happen from one place in the inspector.
-    /// </summary>
     [DisallowMultipleComponent]
     public class UnitAttributes : MonoBehaviour
     {
@@ -19,76 +15,43 @@ namespace Game.Units
         [Header("Optional")]
         public OptionalAttributes Optional = OptionalAttributes.Default();
 
-        void Reset()
-        {
-            Core = CoreAttributes.Default();
-            Recommended = RecommendedAttributes.Default();
-            Optional = OptionalAttributes.Default();
-            ClampAll();
-        }
-
-        void OnValidate()
-        {
-            ClampAll();
-        }
-
-        void ClampAll()
-        {
-            // Ensure inspector edits stay inside supported gameplay ranges.
-            Core.Clamp();
-            Recommended.Clamp();
-            Optional.Clamp();
-        }
+        void Reset() { Core = CoreAttributes.Default(); Recommended = RecommendedAttributes.Default(); Optional = OptionalAttributes.Default(); ClampAll(); }
+        void OnValidate() { ClampAll(); }
+        void ClampAll() { Core.Clamp(); Recommended.Clamp(); Optional.Clamp(); }
 
         [Serializable]
         public struct CoreAttributes
         {
-            [Tooltip("Str: melee / thrown scaling and light physical derived values.")]
+            [Header("Primary Stats")]
             [Range(0, 50)] public int Str;
-
-            [Tooltip("Int: spell / shield scaling and light spell derived values.")]
             [Range(0, 50)] public int Int;
-
-            [Tooltip("Dex: main source of hit, dodge, initiative, crit chance.")]
             [Range(0, 50)] public int Dex;
-
-            [Tooltip("Faith: healing / buffs / status strength and resistance.")]
             [Range(0, 50)] public int Faith;
 
+            [Header("Vitals")]
             [Tooltip("Maximum hit points.")]
-            [Range(50, 300)] public int HPMax;
-
-            [Tooltip("Current hit points.")]
+            [Range(1, 999)] public int HPMax;
             public int HP;
-            // === 2. 新增 MP (Mana) ===
+
             [Tooltip("Maximum mana points.")]
             [Range(0, 10)] public int MPMax;
-
-            [Tooltip("Current mana points.")]
             public int MP;
 
-            // === 2. 新增 MP (Mana) ===
-            [Tooltip("Maximum mana points.")]
-            [Range(0, 10)] public int APMax;
+            [Header("Action Resources")]
+            [Tooltip("Action Points Limit / Recovery per turn.")]
+            [Range(0, 10)] public int MaxAP; // 原来的 AP，现在明确叫 MaxAP
 
-            [Tooltip("Current action points.")]
-            public int AP;
+            [Tooltip("Current Action Points.")]
+            public int CurrentAP; // ⭐ 新增：AP 当前值存在这里
 
-            [Tooltip("Tiles that can be moved each round. Suggested 3-6.")]
             [Range(0, 10)] public int Stride;
-
-            [Tooltip("Initiative value derived mainly from Dex.")]
             [Range(0, 100)] public int Initiative;
-
-            [Tooltip("Physical damage reduction (0-0.6).")]
             [Range(0f, 0.6f)] public float Armor;
-
-            [Tooltip("Magical damage reduction (0-0.6).")]
             [Range(0f, 0.6f)] public float Ward;
 
             public static CoreAttributes Default()
             {
-                var stats = new CoreAttributes
+                return new CoreAttributes
                 {
                     Str = 10,
                     Int = 10,
@@ -96,156 +59,56 @@ namespace Game.Units
                     Faith = 10,
                     HPMax = 100,
                     HP = 100,
-                    AP = 4,
+                    MPMax = 50,
+                    MP = 50,
+                    MaxAP = 4,
+                    CurrentAP = 4, // 默认满 AP
                     Stride = 4,
                     Initiative = 20,
                     Armor = 0f,
                     Ward = 0f
                 };
-                stats.Clamp();
-                return stats;
             }
 
             public void Clamp()
             {
-                Str = Mathf.Clamp(Str, 0, 50);
-                Int = Mathf.Clamp(Int, 0, 50);
-                Dex = Mathf.Clamp(Dex, 0, 50);
-                Faith = Mathf.Clamp(Faith, 0, 50);
-                HPMax = Mathf.Clamp(HPMax, 50, 300);
+                HPMax = Mathf.Max(1, HPMax);
                 HP = Mathf.Clamp(HP, 0, HPMax);
-                AP = Mathf.Clamp(AP, 0, 10);
-                Stride = Mathf.Clamp(Stride, 0, 10);
-                Initiative = Mathf.Clamp(Initiative, 0, 100);
-                Armor = Mathf.Clamp(Armor, 0f, 0.6f);
-                Ward = Mathf.Clamp(Ward, 0f, 0.6f);
+                MPMax = Mathf.Max(0, MPMax);
+                MP = Mathf.Clamp(MP, 0, MPMax);
+                MaxAP = Mathf.Clamp(MaxAP, 0, 10);
+                CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
             }
         }
 
         [Serializable]
         public struct RecommendedAttributes
         {
-            [Tooltip("Accuracy; typically derived from Dex and equipment.")]
             public int Accuracy;
-
-            [Tooltip("Evasion; typically derived from Dex and passives.")]
             public int Evasion;
-
-            [Tooltip("Critical hit chance (0-1).")]
             [Range(0f, 1f)] public float CritChance;
-
-            [Tooltip("Critical damage multiplier (1.0-2.5).")]
             [Range(1f, 2.5f)] public float CritMult;
-
-            [Tooltip("Status / healing / barrier potency (caster side).")]
             public float StatusPotency;
-
-            [Tooltip("Status resistance (target side).")]
             public float StatusResist;
-
-            [Tooltip("Physical penetration (reduces Armor).")]
             [Range(0f, 1f)] public float PenetrationPhys;
-
-            [Tooltip("Magical penetration (reduces Ward).")]
             [Range(0f, 1f)] public float PenetrationMag;
 
-            [Tooltip("Astral element resistance (0-1).")]
-            [Range(0f, 1f)] public float ResistAstral;
+            public static RecommendedAttributes Default() => new RecommendedAttributes { CritChance = 0.1f, CritMult = 1.5f, StatusPotency = 1f, SecondsPerTile = 0.2f };
 
-            [Tooltip("Lunar element resistance (0-1).")]
-            [Range(0f, 1f)] public float ResistLunar;
-
-            [Tooltip("Umbral element resistance (0-1).")]
-            [Range(0f, 1f)] public float ResistUmbral;
-
-            [Tooltip("Seconds needed to traverse one tile (0.1-1.0).")]
             [Range(0.1f, 1f)] public float SecondsPerTile;
-
-            public static RecommendedAttributes Default()
-            {
-                var stats = new RecommendedAttributes
-                {
-                    Accuracy = 0,
-                    Evasion = 0,
-                    CritChance = 0.1f,
-                    CritMult = 1.5f,
-                    StatusPotency = 1f,
-                    StatusResist = 0f,
-                    PenetrationPhys = 0f,
-                    PenetrationMag = 0f,
-                    ResistAstral = 0f,
-                    ResistLunar = 0f,
-                    ResistUmbral = 0f,
-                    SecondsPerTile = 0.2f
-                };
-                stats.Clamp();
-                return stats;
-            }
-
-            public void Clamp()
-            {
-                CritChance = Mathf.Clamp01(CritChance);
-                CritMult = Mathf.Clamp(CritMult, 1f, 2.5f);
-                StatusPotency = Mathf.Max(0f, StatusPotency);
-                StatusResist = Mathf.Max(0f, StatusResist);
-                PenetrationPhys = Mathf.Clamp01(PenetrationPhys);
-                PenetrationMag = Mathf.Clamp01(PenetrationMag);
-                ResistAstral = Mathf.Clamp01(ResistAstral);
-                ResistLunar = Mathf.Clamp01(ResistLunar);
-                ResistUmbral = Mathf.Clamp01(ResistUmbral);
-                SecondsPerTile = Mathf.Clamp(SecondsPerTile, 0.1f, 1f);
-            }
+            public void Clamp() { CritChance = Mathf.Clamp01(CritChance); CritMult = Mathf.Clamp(CritMult, 1f, 2.5f); }
         }
 
         [Serializable]
         public struct OptionalAttributes
         {
-            [Tooltip("Temporary barrier that absorbs damage before HP.")]
             public int Shield;
-
-            [Tooltip("Poise / stagger threshold.")]
             public int Poise;
-
-            [Tooltip("Ammo / charge count for limited abilities.")]
             public int Ammo;
-
-            [Tooltip("Sight range measured in tiles.")]
             public int SightRange;
-
-            [Tooltip("Whether the unit requires line of sight to target.")]
             public bool RequiresLoS;
-
-            [Tooltip("Weight / load value.")]
-            public float Weight;
-
-            [Tooltip("Cooldown reduction (0-1).")]
-            [Range(0f, 1f)] public float CDR;
-
-            public static OptionalAttributes Default()
-            {
-                var stats = new OptionalAttributes
-                {
-                    Shield = 0,
-                    Poise = 0,
-                    Ammo = 0,
-                    SightRange = 6,
-                    RequiresLoS = true,
-                    Weight = 0f,
-                    CDR = 0f
-                };
-                stats.Clamp();
-                return stats;
-            }
-
-            public void Clamp()
-            {
-                Shield = Mathf.Max(0, Shield);
-                Poise = Mathf.Max(0, Poise);
-                Ammo = Mathf.Max(0, Ammo);
-                SightRange = Mathf.Max(0, SightRange);
-                // Weight intentionally left without clamping to support custom rules.
-                CDR = Mathf.Clamp01(CDR);
-            }
+            public static OptionalAttributes Default() => new OptionalAttributes { SightRange = 6, RequiresLoS = true };
+            public void Clamp() { Shield = Mathf.Max(0, Shield); }
         }
     }
 }

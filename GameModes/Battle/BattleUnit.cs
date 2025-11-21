@@ -1,58 +1,54 @@
 using UnityEngine;
-using System.Collections.Generic; // ⚡ 需要引用 List
+using System.Collections.Generic;
 using Game.Units;
 using Game.Core;
-using Game.Battle.Abilities;      // ⚡ 引用 Ability
+using Game.Battle.Abilities;
 
 namespace Game.Battle
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Unit))]
     [RequireComponent(typeof(UnitMover))]
-    // ⚡ 强制要求有属性组件，这样就不会出现“没血条”的情况了
     [RequireComponent(typeof(UnitAttributes))]
     public class BattleUnit : MonoBehaviour
     {
-        [Header("Battle Identity")]
-        [SerializeField] private FactionMembership _faction;
+        // === 1. 移除冗余 Faction，直接引用 Unit ===
+        private Unit _unit;
+        public Unit UnitRef => _unit ? _unit : (_unit = GetComponent<Unit>());
 
-        [Header("Action Points (AP)")]
-        [SerializeField, Min(0)] private int maxAP = 2;
-        public int MaxAP => maxAP;
-        public int CurAP { get; private set; }
+        // 快捷访问：IsPlayer
+        public bool isPlayer => UnitRef.Faction != null && UnitRef.Faction.side == Side.Player;
+        public bool IsPlayerControlled => UnitRef.IsPlayerControlled;
 
-        // === 3. 新增：技能列表 ===
+        // === 2. 移除本地 AP，改为属性代理 ===
+        private UnitAttributes _attributes;
+        public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
+
+        // 代理属性：直接读写 Attributes.Core
+        public int MaxAP => Attributes.Core.MaxAP;
+        public int CurAP
+        {
+            get => Attributes.Core.CurrentAP;
+            private set => Attributes.Core.CurrentAP = Mathf.Clamp(value, 0, MaxAP);
+        }
+
         [Header("Skills")]
         public List<Ability> abilities = new List<Ability>();
-
-        // === 快捷访问属性 (可选，方便其他脚本调用) ===
-        public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
-        private UnitAttributes _attributes;
-
-        [SerializeField] private bool _isPlayer = true;
-        public bool isPlayer
-        {
-            get => _faction ? (_faction.side == Side.Player) : _isPlayer;
-            set
-            {
-                if (_faction) _faction.side = value ? Side.Player : Side.Enemy;
-                _isPlayer = value;
-            }
-        }
-        public bool IsPlayerControlled => _faction ? _faction.IsPlayerControlled : isPlayer;
 
         UnitMover _mover;
 
         void Awake()
         {
+            _unit = GetComponent<Unit>();
             _mover = GetComponent<UnitMover>();
-            _attributes = GetComponent<UnitAttributes>(); // 缓存引用
+            _attributes = GetComponent<UnitAttributes>();
             ResetTurnResources();
         }
 
         public void ResetTurnResources()
         {
-            CurAP = Mathf.Max(0, MaxAP);
+            // 回合开始：回满 AP，重置步数
+            CurAP = MaxAP;
             _mover?.ResetStride();
         }
 
@@ -60,11 +56,11 @@ namespace Game.Battle
         {
             if (cost <= 0) return true;
             if (CurAP < cost) return false;
-            CurAP -= cost;
+
+            CurAP -= cost; // 会触发 Setter 更新 Attributes
             return true;
         }
 
-        // ⚡ 新增：消耗 MP 的辅助方法 (连接到 UnitAttributes)
         public bool TrySpendMP(int cost)
         {
             if (cost <= 0) return true;
@@ -77,12 +73,12 @@ namespace Game.Battle
         public void RefundAP(int amount)
         {
             if (amount <= 0) return;
-            CurAP = Mathf.Clamp(CurAP + amount, 0, MaxAP);
+            CurAP += amount;
         }
 
         public void SetMaxAP(int value, bool refill = true)
         {
-            maxAP = Mathf.Max(0, value);
+            Attributes.Core.MaxAP = Mathf.Max(0, value);
             if (refill) CurAP = MaxAP;
         }
     }

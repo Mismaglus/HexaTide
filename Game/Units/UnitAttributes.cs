@@ -33,9 +33,7 @@ namespace Game.Units
             [Range(1, 999)] public int HPMax;
             public int HP;
 
-            // ⭐ 修改：MP 移到了 Action Resources，并新增了 Recovery
             [Header("Action Resources")]
-
             [Tooltip("Action Points Limit (Automatically refills to full every turn).")]
             [Range(0, 10)] public int MaxAP;
             public int CurrentAP;
@@ -45,10 +43,15 @@ namespace Game.Units
             public int MP;
 
             [Tooltip("Mana recovered at the start of each turn.")]
-            [Range(0, 50)] public int MPRecovery; // ⭐ 新增字段
+            [Range(0, 50)] public int MPRecovery;
 
             [Header("Movement & Defense")]
-            [Range(0, 10)] public int Stride;
+            [Tooltip("Max movement steps per turn.")]
+            [Range(0, 10)] public int Stride; // 这是 Max Stride
+
+            [Tooltip("Current movement steps remaining.")]
+            public int CurrentStride; // ⭐ 新增：当前剩余步数
+
             [Range(0, 100)] public int Initiative;
             [Range(0f, 0.6f)] public float Armor;
             [Range(0f, 0.6f)] public float Ward;
@@ -64,14 +67,14 @@ namespace Game.Units
                     HPMax = 100,
                     HP = 100,
 
-                    // 资源默认值
                     MaxAP = 4,
                     CurrentAP = 4,
                     MPMax = 50,
                     MP = 50,
-                    MPRecovery = 2, // ⭐ 默认恢复 2 点
+                    MPRecovery = 2,
 
                     Stride = 4,
+                    CurrentStride = 4, // ⭐ 默认满步数
                     Initiative = 20,
                     Armor = 0f,
                     Ward = 0f
@@ -85,10 +88,13 @@ namespace Game.Units
 
                 MPMax = Mathf.Max(0, MPMax);
                 MP = Mathf.Clamp(MP, 0, MPMax);
-                MPRecovery = Mathf.Max(0, MPRecovery); // ⭐ Clamp
+                MPRecovery = Mathf.Max(0, MPRecovery);
 
                 MaxAP = Mathf.Clamp(MaxAP, 0, 10);
                 CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
+
+                Stride = Mathf.Clamp(Stride, 0, 10);
+                CurrentStride = Mathf.Clamp(CurrentStride, 0, Stride); // ⭐ Clamp
             }
         }
 

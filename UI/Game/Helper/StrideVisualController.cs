@@ -15,33 +15,40 @@ namespace Game.UI.Helper
         public Image remainStride;
 
         [Header("Max Stride Backgrounds (Index 0 = Max 2)")]
-        [Tooltip("拖入 MaxStride 从 2 到 6 的背景图 (共5张)")]
+        [Tooltip("拖入 MaxStride 从 2 到 6 的背景图 (共5张)。Tint 层也会使用这张图。")]
         public Sprite[] bgSprites; // 0:Max2, 1:Max3, 2:Max4, 3:Max5, 4:Max6
 
-        [Tooltip("拖入 MaxStride 从 2 到 6 的 Tint 图 (共5张)")]
-        public Sprite[] tintSprites;
+        // 已移除 Full Stride 字段，逻辑中直接复用 bgSprites
 
-        [Header("Generic Remaining Sprites (General Case)")]
-        [Tooltip("通用：剩余 1 格")]
-        public Sprite generic1ofN;
-        [Tooltip("通用：剩余 2 格")]
-        public Sprite generic2ofN;
-        [Tooltip("通用：剩余 3 格")]
-        public Sprite generic3ofN;
-        [Tooltip("通用：剩余 4 格")]
-        public Sprite generic4ofN;
-        [Tooltip("通用：剩余 5 格 (用于 Max=5)")]
-        public Sprite generic5ofN;
+        [Header("Generic Remaining Sprites (0 to 4 of N)")]
+        [Tooltip("通用：剩余 0 格 (0 of N)")]
+        public Sprite generic0OfN;
+
+        [Tooltip("通用：剩余 1 格 (1 of N)")]
+        public Sprite generic1OfN;
+
+        [Tooltip("通用：剩余 2 格 (2 of N)")]
+        public Sprite generic2OfN;
+
+        [Tooltip("通用：剩余 3 格 (3 of N)")]
+        public Sprite generic3OfN;
+
+        [Tooltip("通用：剩余 4 格 (4 of N)")]
+        public Sprite generic4OfN;
+
+        // 已移除 generic5OfN：
+        // 如果 Max=5 且 Current=5 -> 走 Full 逻辑 (用背景图)
+        // 如果 Max=6 且 Current=5 -> 走下面的 Special 逻辑
 
         [Header("Special Sprites (Only for Max = 6)")]
-        [Tooltip("特例：6格上限时的剩余 3 格")]
-        public Sprite special3of6;
-        [Tooltip("特例：6格上限时的剩余 4 格")]
-        public Sprite special4of6;
-        [Tooltip("特例：6格上限时的剩余 5 格")]
-        public Sprite special5of6;
-        [Tooltip("特例：6格上限时的剩余 6 格 (满)")]
-        public Sprite special6of6;
+        [Tooltip("特例：6格上限时的剩余 3 格 (3 of 6)")]
+        public Sprite special3Of6;
+
+        [Tooltip("特例：6格上限时的剩余 4 格 (4 of 6)")]
+        public Sprite special4Of6;
+
+        [Tooltip("特例：6格上限时的剩余 5 格 (5 of 6)")]
+        public Sprite special5Of6;
 
         /// <summary>
         /// 由 UnitFrameUI 调用
@@ -52,60 +59,73 @@ namespace Game.UI.Helper
             // 数组 Index 0 对应 Max 2
             int bgIndex = Mathf.Clamp(max, 2, 6) - 2;
 
-            if (bgIndex >= 0 && bgIndex < bgSprites.Length)
-                if (background) background.sprite = bgSprites[bgIndex];
+            Sprite targetBg = null;
+            if (bgSprites != null && bgIndex >= 0 && bgIndex < bgSprites.Length)
+            {
+                targetBg = bgSprites[bgIndex];
+            }
 
-            if (bgIndex >= 0 && bgIndex < tintSprites.Length)
-                if (backgroundTint) backgroundTint.sprite = tintSprites[bgIndex];
+            if (targetBg != null)
+            {
+                if (background) background.sprite = targetBg;
+                if (backgroundTint) backgroundTint.sprite = targetBg;
+            }
 
             // 2. 更新前景 (RemainStride)
-            Sprite targetSprite = GetRemainSprite(current, max);
+            Sprite targetRemain = GetRemainSprite(current, max, targetBg);
 
             if (remainStride)
             {
-                if (targetSprite != null)
+                if (targetRemain != null)
                 {
                     remainStride.enabled = true;
-                    remainStride.sprite = targetSprite;
-                    // 如果你的图片尺寸不一，可能需要 SetNativeSize，否则保持原样
+                    remainStride.sprite = targetRemain;
                     remainStride.SetNativeSize();
                 }
                 else
                 {
-                    // 如果 stride <= 0 或者没配置图片，隐藏前景
                     remainStride.enabled = false;
                 }
             }
         }
 
-        private Sprite GetRemainSprite(int current, int max)
+        private Sprite GetRemainSprite(int current, int max, Sprite currentBg)
         {
-            if (current <= 0) return null;
+            // === Case: Full Stride (满步数) ===
+            // 无论是 3/3, 5/5 还是 6/6，只要满了，就显示完整的背景图作为前景
+            if (current >= max)
+            {
+                return currentBg;
+            }
 
-            // === 特殊情况：Max Stride = 6 ===
+            // === Case: Zero Stride (0步) ===
+            if (current <= 0)
+            {
+                return generic0OfN;
+            }
+
+            // === Case: Special Max = 6 ===
             if (max == 6)
             {
                 switch (current)
                 {
-                    case 1: return generic1ofN;      // 1 使用通用
-                    case 2: return generic2ofN;      // 2 使用通用 (你的特殊需求)
-                    case 3: return special3of6;      // 3 使用特例
-                    case 4: return special4of6;      // 4 使用特例
-                    case 5: return special5of6;      // 5 使用特例
-                    case 6: return special6of6;      // 6 使用特例
-                    default: return special6of6;     // 溢出保底
+                    case 1: return generic1OfN;      // 1 使用通用
+                    case 2: return generic2OfN;      // 2 使用通用
+                    case 3: return special3Of6;      // 3 使用特例
+                    case 4: return special4Of6;      // 4 使用特例
+                    case 5: return special5Of6;      // 5 使用特例
+                    default: return currentBg;       // 理论上不会走到这里 (>=6 已被上面拦截)
                 }
             }
 
-            // === 一般情况 (Max 2~5) ===
+            // === Case: General (Max 2~5) ===
             switch (current)
             {
-                case 1: return generic1ofN;
-                case 2: return generic2ofN;
-                case 3: return generic3ofN;
-                case 4: return generic4ofN;
-                case 5: return generic5ofN;
-                default: return generic5ofN; // 溢出保底
+                case 1: return generic1OfN;
+                case 2: return generic2OfN;
+                case 3: return generic3OfN;
+                case 4: return generic4OfN;
+                default: return currentBg;
             }
         }
     }

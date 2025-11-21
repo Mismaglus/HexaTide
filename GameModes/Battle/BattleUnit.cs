@@ -39,34 +39,25 @@ namespace Game.Battle
             _unit = GetComponent<Unit>();
             _mover = GetComponent<UnitMover>();
             _attributes = GetComponent<UnitAttributes>();
-
-            // ❌ 删除这行！不要在出生时自动回蓝/回AP
-            // ResetTurnResources(); 
-
-            // ✅ 替代方案：仅做必要的各种状态重置，但不加数值
-            _mover?.ResetStride();
-
-            // 如果你希望单位出生时 AP 自动补满（防止你在 Inspector 里填了 0），
-            // 可以取消下面这行的注释。
-            // 但为了“所见即所得”，通常建议你在 Inspector 里直接把 CurrentAP 填好。
-            // CurAP = MaxAP; 
+            // 注意：不要在 Awake 里 Reset，让数据由 Inspector 初始化
         }
 
-        // 这个方法只应该由 TurnController 在“轮到该单位行动”时调用
         public void ResetTurnResources()
         {
-            // 1. AP 回满 (AP 是回合制资源，每回合刷新)
+            // 1. AP 回满
             CurAP = MaxAP;
 
-            // 2. MP 恢复 (MP 是累积资源，每回合增加)
+            // 2. MP 恢复
             int regen = Attributes.Core.MPRecovery;
             if (regen > 0 && Attributes.Core.MP < Attributes.Core.MPMax)
             {
                 Attributes.Core.MP = Mathf.Min(Attributes.Core.MP + regen, Attributes.Core.MPMax);
             }
 
-            // 3. 重置移动
-            _mover?.ResetStride();
+            // 3. 重置移动 (直接操作 Attributes)
+            Attributes.Core.CurrentStride = Attributes.Core.Stride;
+
+            // _mover.ResetStride() 已被移除，不再需要调用
         }
 
         public bool TrySpendAP(int cost = 1)

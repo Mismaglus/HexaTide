@@ -8,19 +8,17 @@ using Game.Grid;
 namespace Game.Units
 {
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(UnitAttributes))] // ⭐ 现在强依赖 Attributes
     public class UnitMover : MonoBehaviour
     {
-        [Header("Stride (steps per turn)")]
-        [Min(0)] public int strideMax = 3;
-        public int strideLeft { get; private set; }
+        // ❌ strideLeft 和 strideMax 都移除了，完全代理给 Attributes
 
         [Header("Motion")]
-        [Tooltip("Seconds used to traverse one hex tile.")]
         public float secondsPerTile = 0.18f;
 
         [SerializeField] private Unit _unit;
+        [SerializeField] private UnitAttributes _attributes;
 
-        // Only used when the mover is not attached to a Unit component
         private HexCoords _fallbackCoords;
 
         public HexCoords _mCoords
@@ -54,30 +52,20 @@ namespace Game.Units
 
         void Awake()
         {
-            strideLeft = Mathf.Max(0, strideMax);
+            if (!_unit) _unit = GetComponent<Unit>();
+            if (!_attributes) _attributes = GetComponent<UnitAttributes>();
 
             if (_gridProviderObject == null)
             {
                 var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
                 foreach (var mb in all)
                 {
-                    if (mb is IHexGridProvider)
-                    {
-                        _gridProviderObject = mb;
-                        break;
-                    }
+                    if (mb is IHexGridProvider) { _gridProviderObject = mb; break; }
                 }
             }
 
             _grid = _gridProviderObject as IHexGridProvider;
             RebuildTileCache();
-
-            if (!_unit) _unit = GetComponent<Unit>();
-        }
-
-        public void ResetStride()
-        {
-            strideLeft = Mathf.Max(0, strideMax);
         }
 
         public void WarpTo(HexCoords c)
@@ -106,8 +94,10 @@ namespace Game.Units
             {
                 return false;
             }
+
+            // 消耗 Attributes 里的步数
             int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
-            strideLeft -= cost;
+            if (_attributes) _attributes.Core.CurrentStride -= cost;
 
             OnMoveStarted?.Invoke(_mCoords, dst);
             StartCoroutine(CoMoveOneStep(_mCoords, dst, secondsPerTile, onDone));
@@ -126,7 +116,10 @@ namespace Game.Units
             if (_mCoords.DistanceTo(dst) != 1) return false;
 
             int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
-            if (strideLeft < cost) return false;
+
+            // 检查 Attributes 里的步数
+            int current = _attributes ? _attributes.Core.CurrentStride : 0;
+            if (current < cost) return false;
 
             return true;
         }

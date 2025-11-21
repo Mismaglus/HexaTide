@@ -12,19 +12,16 @@ namespace Game.Battle
     [RequireComponent(typeof(UnitAttributes))]
     public class BattleUnit : MonoBehaviour
     {
-        // === 1. 移除冗余 Faction，直接引用 Unit ===
         private Unit _unit;
         public Unit UnitRef => _unit ? _unit : (_unit = GetComponent<Unit>());
 
-        // 快捷访问：IsPlayer
         public bool isPlayer => UnitRef.Faction != null && UnitRef.Faction.side == Side.Player;
         public bool IsPlayerControlled => UnitRef.IsPlayerControlled;
 
-        // === 2. 移除本地 AP，改为属性代理 ===
         private UnitAttributes _attributes;
         public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
 
-        // 代理属性：直接读写 Attributes.Core
+        // 代理属性
         public int MaxAP => Attributes.Core.MaxAP;
         public int CurAP
         {
@@ -47,8 +44,18 @@ namespace Game.Battle
 
         public void ResetTurnResources()
         {
-            // 回合开始：回满 AP，重置步数
+            // 1. AP 回满 (Refills to max)
             CurAP = MaxAP;
+
+            // 2. MP 恢复 (Recovers by rate)
+            // ⭐ 新增：读取 MPRecovery 并增加 MP，不超过 MPMax
+            int regen = Attributes.Core.MPRecovery;
+            if (regen > 0 && Attributes.Core.MP < Attributes.Core.MPMax)
+            {
+                Attributes.Core.MP = Mathf.Min(Attributes.Core.MP + regen, Attributes.Core.MPMax);
+            }
+
+            // 3. 重置移动步数
             _mover?.ResetStride();
         }
 
@@ -56,8 +63,7 @@ namespace Game.Battle
         {
             if (cost <= 0) return true;
             if (CurAP < cost) return false;
-
-            CurAP -= cost; // 会触发 Setter 更新 Attributes
+            CurAP -= cost;
             return true;
         }
 
@@ -65,7 +71,6 @@ namespace Game.Battle
         {
             if (cost <= 0) return true;
             if (Attributes.Core.MP < cost) return false;
-
             Attributes.Core.MP -= cost;
             return true;
         }

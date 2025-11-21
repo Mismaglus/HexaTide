@@ -33,17 +33,21 @@ namespace Game.Units
             [Range(1, 999)] public int HPMax;
             public int HP;
 
+            // ⭐ 修改：MP 移到了 Action Resources，并新增了 Recovery
+            [Header("Action Resources")]
+
+            [Tooltip("Action Points Limit (Automatically refills to full every turn).")]
+            [Range(0, 10)] public int MaxAP;
+            public int CurrentAP;
+
             [Tooltip("Maximum mana points.")]
-            [Range(0, 10)] public int MPMax;
+            [Range(0, 200)] public int MPMax;
             public int MP;
 
-            [Header("Action Resources")]
-            [Tooltip("Action Points Limit / Recovery per turn.")]
-            [Range(0, 10)] public int MaxAP; // 原来的 AP，现在明确叫 MaxAP
+            [Tooltip("Mana recovered at the start of each turn.")]
+            [Range(0, 50)] public int MPRecovery; // ⭐ 新增字段
 
-            [Tooltip("Current Action Points.")]
-            public int CurrentAP; // ⭐ 新增：AP 当前值存在这里
-
+            [Header("Movement & Defense")]
             [Range(0, 10)] public int Stride;
             [Range(0, 100)] public int Initiative;
             [Range(0f, 0.6f)] public float Armor;
@@ -59,10 +63,14 @@ namespace Game.Units
                     Faith = 10,
                     HPMax = 100,
                     HP = 100,
+
+                    // 资源默认值
+                    MaxAP = 4,
+                    CurrentAP = 4,
                     MPMax = 50,
                     MP = 50,
-                    MaxAP = 4,
-                    CurrentAP = 4, // 默认满 AP
+                    MPRecovery = 2, // ⭐ 默认恢复 2 点
+
                     Stride = 4,
                     Initiative = 20,
                     Armor = 0f,
@@ -74,8 +82,11 @@ namespace Game.Units
             {
                 HPMax = Mathf.Max(1, HPMax);
                 HP = Mathf.Clamp(HP, 0, HPMax);
+
                 MPMax = Mathf.Max(0, MPMax);
                 MP = Mathf.Clamp(MP, 0, MPMax);
+                MPRecovery = Mathf.Max(0, MPRecovery); // ⭐ Clamp
+
                 MaxAP = Mathf.Clamp(MaxAP, 0, 10);
                 CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
             }

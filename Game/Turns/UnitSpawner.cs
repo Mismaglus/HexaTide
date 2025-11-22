@@ -1,7 +1,7 @@
 using UnityEngine;
 using Core.Hex;
-using Game.Units;   // 新增：拿通用 Unit / UnitMover
-using Game.Grid;    // 若需要用到 IHexGridProvider，可保留
+using Game.Units;
+using Game.Grid;
 
 namespace Game.Battle
 {
@@ -34,7 +34,7 @@ namespace Game.Battle
             // 1) 实例化
             var go = Instantiate(unitPrefab.gameObject, Vector3.zero, Quaternion.identity, transform);
 
-            // 2) 用通用 Unit 初始化到指定格（注意：不是 BattleUnit）
+            // 2) 初始化位置
             var unit = go.GetComponent<Unit>();
             if (!unit)
             {
@@ -42,15 +42,25 @@ namespace Game.Battle
                 return;
             }
             var c = new HexCoords(startQ, startR);
-            unit.Initialize(grid, c);   // BattleHexGrid 实现了 IHexGridProvider，可直接传
+            unit.Initialize(grid, c);
 
-            // 3) 在这里加入“注册占位”的代码（关键两行）
-            var sel = selection ? selection : Object.FindFirstObjectByType<SelectionManager>();
+            // 3) 注册占位
+            var sel = selection ? selection : FindFirstObjectByType<SelectionManager>();
             sel?.RegisterUnit(unit);
 
-            // 4) 可选：刷新步点，便于立刻可动
-            var mover = go.GetComponent<UnitMover>();
-            mover?.ResetStride();
+            // 4) ? 修复：初始化资源 (AP/MP/Stride)
+            // 使用 BattleUnit.ResetTurnResources 来代替旧的 mover.ResetStride
+            var battleUnit = go.GetComponent<BattleUnit>();
+            if (battleUnit)
+            {
+                battleUnit.ResetTurnResources();
+            }
+            else
+            {
+                // 如果没有 BattleUnit (纯 Unit)，尝试手动重置 Attributes
+                var attrs = go.GetComponent<UnitAttributes>();
+                if (attrs) attrs.Core.CurrentStride = attrs.Core.Stride;
+            }
         }
     }
 }

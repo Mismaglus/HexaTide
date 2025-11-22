@@ -1,6 +1,8 @@
+using System.Collections; // ⭐ 必须引用，用于 IEnumerator
 using UnityEngine;
 using Game.Units;
 using Game.Battle.Combat;
+using Game.Battle.Abilities;
 
 namespace Game.Battle.Abilities.Effects
 {
@@ -11,22 +13,33 @@ namespace Game.Battle.Abilities.Effects
         public int baseDamage = 10;
         public float scalingFactor = 1.0f;
 
-        public override void Apply(BattleUnit source, BattleUnit target, AbilityContext ctx)
+        // ⭐ 修复：返回类型改为 IEnumerator
+        public override IEnumerator Apply(BattleUnit source, Ability ability, AbilityContext ctx)
         {
-            if (source == null || target == null) return;
+            // 安全检查
+            if (source == null || ctx == null || ctx.TargetUnits == null)
+                yield break; // ⭐ 协程中不能用 return; 必须用 yield break;
 
-            // 1. 计算伤害
-            CombatResult result = CombatCalculator.CalculateDamage(source, target, this);
+            foreach (var target in ctx.TargetUnits)
+            {
+                if (target == null) continue;
 
-            // 2. 打印日志 (可选：如果 CombatCalculator 没打，这里打)
-            Debug.Log($"[DamageEffect] {source.name} hits {target.name} for {result.finalDamage} dmg " +
-                      $"{(result.isCritical ? "(CRIT!)" : "")}");
+                // 1. 计算伤害
+                CombatResult result = CombatCalculator.CalculateDamage(source, target, this);
 
-            // 3. ⭐⭐⭐ 核心修改：调用 TakeDamage 触发受击/死亡流程 ⭐⭐⭐
-            // 之前是: target.Attributes.Core.HP -= result.finalDamage;
-            target.TakeDamage(result.finalDamage);
+                // 2. 打印日志
+                Debug.Log($"[DamageEffect] {source.name} hits {target.name} for {result.finalDamage} dmg " +
+                          $"{(result.isCritical ? "(CRIT!)" : "")}");
 
-            // (这里未来可以添加飘字 UI 调用，比如 FloatingTextManager.Show(result.finalDamage))
+                // 3. 应用伤害 (TakeDamage 内部会处理动画和死亡)
+                target.TakeDamage(result.finalDamage);
+
+                // 💡 可选：如果你希望每个目标的受击之间有微小延迟（增加打击感）
+                // yield return new WaitForSeconds(0.1f);
+            }
+
+            // 结束协程
+            yield break;
         }
 
         public override string GetDescription()

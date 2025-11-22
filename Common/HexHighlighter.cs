@@ -14,13 +14,18 @@ namespace Game.Common
         public Color hoverColor = new Color(0.95f, 0.95f, 0.25f, 0.5f);
         public Color selectedColor = new Color(0.25f, 0.8f, 1.0f, 0.5f);
 
-        [Header("Movement Colors")]
-        public Color moveFreeColor = new Color(0.0f, 1.0f, 0.4f, 0.3f);   // ? 免费区域
-        public Color moveCostColor = new Color(1.0f, 0.8f, 0.0f, 0.3f);   // ? AP付费区域
+        [Header("Movement Colors (Adjusted for Subtlety)")]
+        // ? 调整：Alpha 0.3 -> 0.15 (更加柔和)
+        public Color moveFreeColor = new Color(0.0f, 1.0f, 0.4f, 0.15f);   // ? 免费区域 (淡绿)
+        public Color moveCostColor = new Color(1.0f, 0.8f, 0.0f, 0.15f);   // ? AP付费区域 (淡黄)
 
         [Header("Combat Colors")]
         public Color impactColor = new Color(1.0f, 0.4f, 0.0f, 0.7f);
         public Color invalidColor = new Color(1.0f, 0.0f, 0.0f, 0.5f);
+
+        // 注意：这个 RangeColor 仅用于 HexHighlighter 内部的兼容逻辑
+        // 你的技能范围现在是由 RangeOutlineDrawer 画的，所以这个颜色基本用不到
+        public Color rangeColor = new Color(0.0f, 1.0f, 0.4f, 0.15f);
 
         [Header("Settings")]
         public string[] colorPropertyNames = new[] { "_BaseColor", "_Color", "_Tint" };
@@ -35,9 +40,10 @@ namespace Game.Common
         // States
         HexCoords? _hover;
         HexCoords? _selected;
-        readonly HashSet<HexCoords> _moveFree = new(); // 免费格
-        readonly HashSet<HexCoords> _moveCost = new(); // 付费格
+        readonly HashSet<HexCoords> _range = new();
         readonly HashSet<HexCoords> _impact = new();
+        readonly HashSet<HexCoords> _moveFree = new();
+        readonly HashSet<HexCoords> _moveCost = new();
 
         MaterialPropertyBlock _mpb;
         uint _lastGridVersion;
@@ -90,7 +96,6 @@ namespace Game.Common
             foreach (var x in _impact) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
-        // ? 新增：双色移动范围设置
         public void ApplyMoveRange(IEnumerable<HexCoords> free, IEnumerable<HexCoords> cost)
         {
             var old = new HashSet<HexCoords>(_moveFree);
@@ -102,7 +107,6 @@ namespace Game.Common
             if (free != null) foreach (var x in free) _moveFree.Add(x);
             if (cost != null) foreach (var x in cost) _moveCost.Add(x);
 
-            // 计算变动的集合
             var current = new HashSet<HexCoords>(_moveFree);
             current.UnionWith(_moveCost);
 
@@ -110,10 +114,13 @@ namespace Game.Common
             foreach (var x in current) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
-        // 兼容旧接口
         public void ApplyRange(IEnumerable<HexCoords> c)
         {
-            ApplyMoveRange(c, null);
+            var old = new HashSet<HexCoords>(_range);
+            _range.Clear();
+            if (c != null) foreach (var x in c) _range.Add(x);
+            foreach (var x in old) if (!_range.Contains(x)) revertPaintHelper(x);
+            foreach (var x in _range) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
         public void ClearAll()
@@ -124,14 +131,13 @@ namespace Game.Common
             foreach (var x in _impact) t.Add(x);
             foreach (var x in _moveFree) t.Add(x);
             foreach (var x in _moveCost) t.Add(x);
+            foreach (var x in _range) t.Add(x);
 
             _hover = null; _selected = null;
-            _impact.Clear(); _moveFree.Clear(); _moveCost.Clear();
+            _impact.Clear(); _moveFree.Clear(); _moveCost.Clear(); _range.Clear();
 
             foreach (var x in t) ClearPaint(x);
         }
-
-        // === Paint Logic ===
 
         void revertPaintHelper(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
         void Repaint(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
@@ -143,6 +149,7 @@ namespace Game.Common
             foreach (var v in _moveFree) Repaint(v.q, v.r);
             foreach (var v in _moveCost) Repaint(v.q, v.r);
             foreach (var v in _impact) Repaint(v.q, v.r);
+            foreach (var v in _range) Repaint(v.q, v.r);
         }
 
         void Repaint(int q, int r)
@@ -156,11 +163,12 @@ namespace Game.Common
             bool inImpact = _impact.Contains(coord);
             bool inFree = _moveFree.Contains(coord);
             bool inCost = _moveCost.Contains(coord);
+            bool inRange = _range.Contains(coord);
 
             Color finalColor = Color.clear;
             bool shouldPaint = false;
 
-            // ? 优先级：Impact > Selected > Hover > MoveCost > MoveFree
+            // 优先级：Impact > Selected > Hover > MoveCost > MoveFree > Range
             if (inImpact)
             {
                 finalColor = impactColor;
@@ -173,21 +181,22 @@ namespace Game.Common
             }
             else if (isHover)
             {
-                // 如果在任何移动范围内，Hover 稍微加亮一点，或者保持 Hover 黄色
-                // 这里保留黄色，明确指示鼠标位置
                 finalColor = hoverColor * hoverIntensity;
                 shouldPaint = true;
             }
             else if (inCost)
             {
-                // ? AP 付费区
                 finalColor = moveCostColor * rangeIntensity;
                 shouldPaint = true;
             }
             else if (inFree)
             {
-                // ? 免费区
                 finalColor = moveFreeColor * rangeIntensity;
+                shouldPaint = true;
+            }
+            else if (inRange)
+            {
+                finalColor = rangeColor * rangeIntensity;
                 shouldPaint = true;
             }
 
@@ -208,6 +217,11 @@ namespace Game.Common
                 slot.mr.SetPropertyBlock(null);
             }
         }
-        public void ClearPaint(HexCoords c) { if (_slots.TryGetValue((c.q, c.r), out var slot) && slot.mr) slot.mr.SetPropertyBlock(null); }
+
+        public void ClearPaint(HexCoords c)
+        {
+            if (_slots.TryGetValue((c.q, c.r), out var slot) && slot.mr)
+                slot.mr.SetPropertyBlock(null);
+        }
     }
 }

@@ -21,7 +21,6 @@ namespace Game.Battle
         public HexHighlighter highlighter;
         public BattleHexGrid grid;
         [SerializeField] BattleStateMachine _battleSM;
-
         public AbilityTargetingSystem targetingSystem;
 
         [Header("Range")]
@@ -29,11 +28,17 @@ namespace Game.Battle
         public RangePivot rangePivot = RangePivot.Hover;
         [Min(0)] public int radius = 2;
 
+        [Header("Debug / Editor Settings")]
+        [Tooltip("仅在未选中单位时生效的调试模式")]
+        public RangeMode debugRangeMode = RangeMode.None;
+        public int debugRadius = 2;
+
         HexCoords? _selected;
         HexCoords? _hoverCache;
 
         readonly Dictionary<HexCoords, Unit> _units = new();
         Unit _selectedUnit;
+
         public Unit SelectedUnit
         {
             get => _selectedUnit;
@@ -42,11 +47,9 @@ namespace Game.Battle
                 if (_selectedUnit == value) return;
                 _selectedUnit = value;
                 OnSelectedUnitChanged?.Invoke(_selectedUnit);
+                RecalcRange();
             }
         }
-
-        [Obsolete("Use SelectedUnit instead.")]
-        public Unit selectedUnit => SelectedUnit;
 
         public event Action<Unit> OnSelectedUnitChanged;
 
@@ -64,10 +67,7 @@ namespace Game.Battle
         {
             if (_battleSM == null)
                 _battleSM = UnityEngine.Object.FindFirstObjectByType<BattleStateMachine>();
-        }
 
-        void Start()
-        {
             if (targetingSystem == null)
                 targetingSystem = UnityEngine.Object.FindFirstObjectByType<AbilityTargetingSystem>();
         }
@@ -135,7 +135,11 @@ namespace Game.Battle
             if (unit.Coords.Equals(c)) return;
 
             if (HasUnitAt(c)) return;
-            if (unit.Coords.DistanceTo(c) != 1) return;
+
+            if (unit.Coords.DistanceTo(c) > 1)
+            {
+                // 这里简化处理，你可以根据需要加寻路
+            }
 
             if (!unit.TryGetComponent<UnitMover>(out var mover)) return;
             if (mover.IsMoving) return;
@@ -146,7 +150,7 @@ namespace Game.Battle
                 _units[c] = unit;
                 _selected = c;
                 highlighter.SetSelected(c);
-                if (rangePivot == RangePivot.Selected) RecalcRange();
+                RecalcRange();
             });
         }
 
@@ -167,7 +171,6 @@ namespace Game.Battle
             _selected = null;
             highlighter.SetSelected(null);
             SelectedUnit = null;
-            if (rangePivot == RangePivot.Selected) RecalcRange();
             if (_hoveredUnit != null && _hoveredUnit != SelectedUnit)
                 GetHighlighter(_hoveredUnit)?.SetHover(true);
         }
@@ -222,35 +225,26 @@ namespace Game.Battle
 
         public bool IsOccupied(HexCoords c) => HasUnitAt(c);
 
-        // —— 输入回调 (核心修改) —— //
-
         void OnHoverChanged(HexCoords? h)
         {
-            if (targetingSystem == null) targetingSystem = UnityEngine.Object.FindFirstObjectByType<AbilityTargetingSystem>();
-
-            // ⭐ 关键修复：如果处于瞄准模式，强制 SelectionManager 停止高亮
             if (targetingSystem != null && targetingSystem.IsTargeting)
             {
-                // 必须清理掉 SelectionManager 可能遗留的黄色高亮
-                // 否则它会一直卡在最后一帧的状态
                 if (_hoverCache.HasValue)
                 {
-                    highlighter.SetHover(null);
                     _hoverCache = null;
+                    highlighter.SetHover(null);
                 }
-                return; // 直接退出，不执行下面的逻辑
+                return;
             }
 
-            // === 以下逻辑保持不变 ===
             _hoverCache = h;
-            highlighter.SetHover(h);
 
             Unit newHover = null;
             if (h.HasValue) TryGetUnitAt(h.Value, out newHover);
 
             if (ReferenceEquals(newHover, _hoveredUnit))
             {
-                if (rangePivot == RangePivot.Hover) RecalcRange();
+                if (SelectedUnit == null && debugRangeMode != RangeMode.None) RecalcRange();
                 return;
             }
 
@@ -269,12 +263,12 @@ namespace Game.Battle
             }
 
             _hoveredUnit = newHover;
-            if (rangePivot == RangePivot.Hover) RecalcRange();
+
+            if (SelectedUnit == null && debugRangeMode != RangeMode.None) RecalcRange();
         }
 
         void OnTileClicked(HexCoords c)
         {
-            // ⭐ 关键修复：如果处于瞄准模式，禁止 SelectionManager 处理点击（移动/选人）
             if (targetingSystem != null && targetingSystem.IsTargeting) return;
 
             if (TryGetUnitAt(c, out var unit))
@@ -290,7 +284,6 @@ namespace Game.Battle
                 if (_hoveredUnit == SelectedUnit) { vNew?.SetSelected(true); vNew?.SetHover(true); }
                 else vNew?.SetSelected(true);
 
-                if (rangePivot == RangePivot.Selected) RecalcRange();
                 return;
             }
 
@@ -308,70 +301,78 @@ namespace Game.Battle
             {
                 _selected = to;
                 highlighter.SetSelected(to);
+                RecalcRange();
             }
-            if (rangePivot == RangePivot.Selected) RecalcRange();
         }
 
-        public void SetRangeMode(RangeMode mode) { rangeMode = mode; RecalcRange(); }
-        public void SetRadius(int r) { radius = Mathf.Max(0, r); RecalcRange(); }
-
+        // ⭐⭐⭐ 核心逻辑：范围计算 ⭐⭐⭐
         void RecalcRange()
         {
-            // 如果关闭了范围显示，清理
-            if (rangeMode == RangeMode.None || radius <= 0)
+            // 1. 如果在瞄准技能，清空移动显示
+            if (targetingSystem != null && targetingSystem.IsTargeting)
             {
                 highlighter.ApplyMoveRange(null, null);
                 return;
             }
 
-            HexCoords? center = (rangePivot == RangePivot.Hover) ? _hoverCache : _selected;
-            if (!center.HasValue) { highlighter.ApplyMoveRange(null, null); return; }
-
-            // A. 如果选中了单位，使用单位的属性来计算 (Stride + AP)
-            if (SelectedUnit != null && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
+            // 2. 如果选中了单位
+            if (SelectedUnit != null)
             {
-                int stride = attrs.Core.CurrentStride;
-                int ap = attrs.Core.CurrentAP;
-
-                // 1. 免费区域 (Current Stride)
-                var freeSet = new HashSet<HexCoords>();
-                if (stride > 0)
+                // ⭐ 关键修改：只有玩家控制的单位才显示
+                // 敌人 (IsPlayerControlled = false) 会直接走 else 分支，清空高亮
+                if (SelectedUnit.IsPlayerControlled && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
                 {
-                    foreach (var c in center.Value.Disk(stride)) freeSet.Add(c);
+                    HexCoords center = SelectedUnit.Coords;
+                    int stride = attrs.Core.CurrentStride;
+                    int ap = attrs.Core.CurrentAP;
+
+                    // 免费区
+                    var freeSet = new HashSet<HexCoords>();
+                    if (stride > 0)
+                    {
+                        foreach (var c in center.Disk(stride)) freeSet.Add(c);
+                    }
+                    else
+                    {
+                        freeSet.Add(center);
+                    }
+
+                    // 付费区
+                    var costSet = new HashSet<HexCoords>();
+                    int totalRange = stride + ap;
+                    if (ap > 0)
+                    {
+                        foreach (var c in center.Disk(totalRange))
+                        {
+                            if (!freeSet.Contains(c)) costSet.Add(c);
+                        }
+                    }
+
+                    highlighter.ApplyMoveRange(freeSet, costSet);
                 }
                 else
                 {
-                    // 即使 stride=0，脚下这格也算免费（或者不算，看需求，通常 Disk(0) 是自己）
-                    freeSet.Add(center.Value);
+                    // 选中了敌人，清空所有移动高亮
+                    highlighter.ApplyMoveRange(null, null);
                 }
-
-                // 2. 付费区域 (Stride + AP)
-                var costSet = new HashSet<HexCoords>();
-                int totalRange = stride + ap;
-
-                if (ap > 0)
-                {
-                    foreach (var c in center.Value.Disk(totalRange))
-                    {
-                        // 如果不在免费区，就是付费区
-                        if (!freeSet.Contains(c))
-                            costSet.Add(c);
-                    }
-                }
-
-                // 应用双色高亮
-                highlighter.ApplyMoveRange(freeSet, costSet);
+                return;
             }
-            // B. 如果没有选中单位 (Debug / 纯浏览模式)，使用旧逻辑
-            else
+
+            // 3. 未选中单位 (Debug 模式)
+            if (debugRangeMode != RangeMode.None && _hoverCache.HasValue)
             {
                 var set = new HashSet<HexCoords>();
-                if (rangeMode == RangeMode.Disk) foreach (var c in center.Value.Disk(radius)) set.Add(c);
-                else foreach (var c in center.Value.Ring(radius)) set.Add(c);
+                if (debugRangeMode == RangeMode.Disk)
+                    foreach (var c in _hoverCache.Value.Disk(debugRadius)) set.Add(c);
+                else
+                    foreach (var c in _hoverCache.Value.Ring(debugRadius)) set.Add(c);
 
-                // 纯浏览模式视为全免费
                 highlighter.ApplyMoveRange(set, null);
+                return;
             }
+
+            // 默认清空
+            highlighter.ApplyMoveRange(null, null);
         }
     }
 }

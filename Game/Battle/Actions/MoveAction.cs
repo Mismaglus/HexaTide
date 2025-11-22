@@ -1,5 +1,6 @@
+// Script/Game/Battle/Actions/MoveAction.cs
 using System.Collections;
-using UnityEngine; // 需要引用这个来使用 GetComponent
+using UnityEngine;
 using Core.Hex;
 using Game.Units;
 
@@ -19,10 +20,10 @@ namespace Game.Battle.Actions
             _to = to;
         }
 
-        // 校验逻辑：
-        // 1. Mover 存在且空闲
-        // 2. 目标是邻居
-        // 3. ⭐ 修复：从 Attributes 检查剩余步数 >= 1
+        // Mirror UnitMover preconditions as much as we can from outside:
+        // 1) mover exists and not already moving
+        // 2) destination is adjacent (distance == 1)
+        // 3) ⭐ at least 1 stride left (Checked via Attributes)
         public bool IsValid
         {
             get
@@ -43,13 +44,17 @@ namespace Game.Battle.Actions
             if (_mover == null)
                 yield break;
 
+            // Try to start the step. UnitMover will internally check:
+            // - has grid
+            // - distance == 1
+            // - strideLeft >= movement cost (>=1)
             bool finished = false;
-            // UnitMover 内部也会检查 Attributes，这里调用是安全的
             bool started = _mover.TryStepTo(_to, () => finished = true);
 
             if (!started)
-                yield break;
+                yield break; // nothing to do if preconditions failed
 
+            // Wait until UnitMover calls our onDone callback
             while (!finished)
                 yield return null;
         }

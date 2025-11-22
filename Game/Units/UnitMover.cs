@@ -8,17 +8,20 @@ using Game.Grid;
 namespace Game.Units
 {
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(UnitAttributes))] // ⭐ 现在强依赖 Attributes
     public class UnitMover : MonoBehaviour
     {
-        // ❌ strideLeft 和 strideMax 都移除了，完全代理给 Attributes
+        // Stride data is now in UnitAttributes
+        // We keep this property for compatibility, reading from Attributes
+        public int strideLeft => _attributes != null ? _attributes.Core.CurrentStride : 0;
 
         [Header("Motion")]
+        [Tooltip("Seconds used to traverse one hex tile.")]
         public float secondsPerTile = 0.18f;
 
         [SerializeField] private Unit _unit;
-        [SerializeField] private UnitAttributes _attributes;
+        [SerializeField] private UnitAttributes _attributes; // ⭐ Added dependency
 
+        // Only used when the mover is not attached to a Unit component
         private HexCoords _fallbackCoords;
 
         public HexCoords _mCoords
@@ -53,20 +56,26 @@ namespace Game.Units
         void Awake()
         {
             if (!_unit) _unit = GetComponent<Unit>();
-            if (!_attributes) _attributes = GetComponent<UnitAttributes>();
+            if (!_attributes) _attributes = GetComponent<UnitAttributes>(); // ⭐ Ensure attributes reference
 
             if (_gridProviderObject == null)
             {
                 var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
                 foreach (var mb in all)
                 {
-                    if (mb is IHexGridProvider) { _gridProviderObject = mb; break; }
+                    if (mb is IHexGridProvider)
+                    {
+                        _gridProviderObject = mb;
+                        break;
+                    }
                 }
             }
 
             _grid = _gridProviderObject as IHexGridProvider;
             RebuildTileCache();
         }
+
+        // Removed ResetStride() - BattleUnit handles resource reset via Attributes
 
         public void WarpTo(HexCoords c)
         {
@@ -95,9 +104,13 @@ namespace Game.Units
                 return false;
             }
 
-            // 消耗 Attributes 里的步数
             int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
-            if (_attributes) _attributes.Core.CurrentStride -= cost;
+
+            // ⭐ Consume from Attributes
+            if (_attributes != null)
+            {
+                _attributes.Core.CurrentStride = Mathf.Max(0, _attributes.Core.CurrentStride - cost);
+            }
 
             OnMoveStarted?.Invoke(_mCoords, dst);
             StartCoroutine(CoMoveOneStep(_mCoords, dst, secondsPerTile, onDone));
@@ -117,9 +130,8 @@ namespace Game.Units
 
             int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
 
-            // 检查 Attributes 里的步数
-            int current = _attributes ? _attributes.Core.CurrentStride : 0;
-            if (current < cost) return false;
+            // ⭐ Check Attributes
+            if (_attributes == null || _attributes.Core.CurrentStride < cost) return false;
 
             return true;
         }

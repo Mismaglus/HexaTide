@@ -317,20 +317,61 @@ namespace Game.Battle
 
         void RecalcRange()
         {
+            // 如果关闭了范围显示，清理
             if (rangeMode == RangeMode.None || radius <= 0)
             {
-                highlighter.ApplyRange(null);
+                highlighter.ApplyMoveRange(null, null);
                 return;
             }
 
             HexCoords? center = (rangePivot == RangePivot.Hover) ? _hoverCache : _selected;
-            if (!center.HasValue) { highlighter.ApplyRange(null); return; }
+            if (!center.HasValue) { highlighter.ApplyMoveRange(null, null); return; }
 
-            var set = new HashSet<HexCoords>();
-            if (rangeMode == RangeMode.Disk) foreach (var c in center.Value.Disk(radius)) set.Add(c);
-            else foreach (var c in center.Value.Ring(radius)) set.Add(c);
+            // A. 如果选中了单位，使用单位的属性来计算 (Stride + AP)
+            if (SelectedUnit != null && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
+            {
+                int stride = attrs.Core.CurrentStride;
+                int ap = attrs.Core.CurrentAP;
 
-            highlighter.ApplyRange(set);
+                // 1. 免费区域 (Current Stride)
+                var freeSet = new HashSet<HexCoords>();
+                if (stride > 0)
+                {
+                    foreach (var c in center.Value.Disk(stride)) freeSet.Add(c);
+                }
+                else
+                {
+                    // 即使 stride=0，脚下这格也算免费（或者不算，看需求，通常 Disk(0) 是自己）
+                    freeSet.Add(center.Value);
+                }
+
+                // 2. 付费区域 (Stride + AP)
+                var costSet = new HashSet<HexCoords>();
+                int totalRange = stride + ap;
+
+                if (ap > 0)
+                {
+                    foreach (var c in center.Value.Disk(totalRange))
+                    {
+                        // 如果不在免费区，就是付费区
+                        if (!freeSet.Contains(c))
+                            costSet.Add(c);
+                    }
+                }
+
+                // 应用双色高亮
+                highlighter.ApplyMoveRange(freeSet, costSet);
+            }
+            // B. 如果没有选中单位 (Debug / 纯浏览模式)，使用旧逻辑
+            else
+            {
+                var set = new HashSet<HexCoords>();
+                if (rangeMode == RangeMode.Disk) foreach (var c in center.Value.Disk(radius)) set.Add(c);
+                else foreach (var c in center.Value.Ring(radius)) set.Add(c);
+
+                // 纯浏览模式视为全免费
+                highlighter.ApplyMoveRange(set, null);
+            }
         }
     }
 }

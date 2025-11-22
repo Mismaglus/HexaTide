@@ -34,7 +34,7 @@ namespace Game.Battle
             // 1) 实例化
             var go = Instantiate(unitPrefab.gameObject, Vector3.zero, Quaternion.identity, transform);
 
-            // 2) 初始化位置
+            // 2) 用通用 Unit 初始化到指定格
             var unit = go.GetComponent<Unit>();
             if (!unit)
             {
@@ -45,7 +45,7 @@ namespace Game.Battle
             unit.Initialize(grid, c);
 
             // 3) 注册占位
-            var sel = selection ? selection : FindFirstObjectByType<SelectionManager>();
+            var sel = selection ? selection : Object.FindFirstObjectByType<SelectionManager>();
             sel?.RegisterUnit(unit);
 
             // 4) ? 修复：初始化资源 (AP/MP/Stride)

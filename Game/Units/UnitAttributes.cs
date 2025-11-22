@@ -29,28 +29,24 @@ namespace Game.Units
             [Range(0, 50)] public int Faith;
 
             [Header("Vitals")]
-            [Tooltip("Maximum hit points.")]
             [Range(1, 999)] public int HPMax;
             public int HP;
 
             [Header("Action Resources")]
-            [Tooltip("Action Points Limit (Automatically refills to full every turn).")]
             [Range(0, 10)] public int MaxAP;
             public int CurrentAP;
 
-            [Tooltip("Maximum mana points.")]
             [Range(0, 200)] public int MPMax;
             public int MP;
-
-            [Tooltip("Mana recovered at the start of each turn.")]
             [Range(0, 50)] public int MPRecovery;
 
             [Header("Movement & Defense")]
+            // ⭐ 修复：限制 Max Stride 为 2~6
             [Tooltip("Max movement steps per turn.")]
-            [Range(0, 10)] public int Stride; // 这是 Max Stride
+            [Range(2, 6)] public int Stride;
 
             [Tooltip("Current movement steps remaining.")]
-            public int CurrentStride; // ⭐ 新增：当前剩余步数
+            public int CurrentStride;
 
             [Range(0, 100)] public int Initiative;
             [Range(0f, 0.6f)] public float Armor;
@@ -73,8 +69,8 @@ namespace Game.Units
                     MP = 50,
                     MPRecovery = 2,
 
-                    Stride = 4,
-                    CurrentStride = 4, // ⭐ 默认满步数
+                    Stride = 3,
+                    CurrentStride = 3,
                     Initiative = 20,
                     Armor = 0f,
                     Ward = 0f
@@ -93,8 +89,9 @@ namespace Game.Units
                 MaxAP = Mathf.Clamp(MaxAP, 0, 10);
                 CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
 
-                Stride = Mathf.Clamp(Stride, 0, 10);
-                CurrentStride = Mathf.Clamp(CurrentStride, 0, Stride); // ⭐ Clamp
+                // ⭐ 修复：Clamp 逻辑
+                Stride = Mathf.Clamp(Stride, 2, 6);
+                CurrentStride = Mathf.Clamp(CurrentStride, 0, Stride);
             }
         }
 

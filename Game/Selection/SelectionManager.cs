@@ -4,6 +4,7 @@ using UnityEngine;
 using Core.Hex;
 using Game.Common;
 using Game.Units;
+using Game.Grid; // 引用 Pathfinder
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -23,13 +24,15 @@ namespace Game.Battle
         [SerializeField] BattleStateMachine _battleSM;
         public AbilityTargetingSystem targetingSystem;
 
+        // ⭐ 新增：引用 BattleRules (用于寻路判断)
+        public BattleRules battleRules;
+
         [Header("Range")]
         public RangeMode rangeMode = RangeMode.None;
         public RangePivot rangePivot = RangePivot.Hover;
         [Min(0)] public int radius = 2;
 
         [Header("Debug / Editor Settings")]
-        [Tooltip("仅在未选中单位时生效的调试模式")]
         public RangeMode debugRangeMode = RangeMode.None;
         public int debugRadius = 2;
 
@@ -52,7 +55,6 @@ namespace Game.Battle
         }
 
         public event Action<Unit> OnSelectedUnitChanged;
-
         Unit _hoveredUnit;
         readonly Dictionary<Unit, UnitHighlighter> _HighlighterCache = new();
 
@@ -65,11 +67,11 @@ namespace Game.Battle
 
         void Awake()
         {
-            if (_battleSM == null)
-                _battleSM = UnityEngine.Object.FindFirstObjectByType<BattleStateMachine>();
+            if (_battleSM == null) _battleSM = FindFirstObjectByType<BattleStateMachine>();
+            if (targetingSystem == null) targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>();
 
-            if (targetingSystem == null)
-                targetingSystem = UnityEngine.Object.FindFirstObjectByType<AbilityTargetingSystem>();
+            // ⭐ 自动查找 BattleRules
+            if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
         }
 
         void Update()
@@ -125,31 +127,44 @@ namespace Game.Battle
             return false;
         }
 
-        void HandleClickOnEmptyTile(HexCoords c)
+        // ⭐⭐⭐ 核心修改：点击移动逻辑 ⭐⭐⭐
+        void HandleClickOnEmptyTile(HexCoords targetCoords)
         {
             if (_battleSM != null && _battleSM.CurrentTurn != TurnSide.Player) return;
             if (SelectedUnit == null || _selected == null) return;
 
             var unit = SelectedUnit;
             if (!unit.IsPlayerControlled) return;
-            if (unit.Coords.Equals(c)) return;
-
-            if (HasUnitAt(c)) return;
-
-            if (unit.Coords.DistanceTo(c) > 1)
-            {
-                // 这里简化处理，你可以根据需要加寻路
-            }
+            if (unit.Coords.Equals(targetCoords)) return;
+            if (HasUnitAt(targetCoords)) return;
 
             if (!unit.TryGetComponent<UnitMover>(out var mover)) return;
             if (mover.IsMoving) return;
 
-            bool ok = mover.TryStepTo(c, onDone: () =>
+            // 1. 使用 A* 寻路
+            if (battleRules == null)
             {
+                Debug.LogError("Missing BattleRules reference in SelectionManager!");
+                return;
+            }
+
+            var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit);
+
+            if (path == null || path.Count == 0)
+            {
+                Debug.Log("[Selection] No path found or target unreachable.");
+                // 这里可以播放一个 Error Sound
+                return;
+            }
+
+            // 2. 执行移动
+            mover.FollowPath(path, onComplete: () =>
+            {
+                // 移动完成后，更新占位
                 RemoveUnitMapping(unit);
-                _units[c] = unit;
-                _selected = c;
-                highlighter.SetSelected(c);
+                _units[unit.Coords] = unit; // unit.Coords 此时已经是终点
+                _selected = unit.Coords;
+                highlighter.SetSelected(unit.Coords);
                 RecalcRange();
             });
         }
@@ -305,41 +320,29 @@ namespace Game.Battle
             }
         }
 
-        // ⭐⭐⭐ 核心逻辑：范围计算 ⭐⭐⭐
         void RecalcRange()
         {
-            // 1. 如果在瞄准技能，清空移动显示
             if (targetingSystem != null && targetingSystem.IsTargeting)
             {
                 highlighter.ApplyMoveRange(null, null);
                 return;
             }
 
-            // 2. 如果选中了单位
             if (SelectedUnit != null)
             {
-                // ⭐ 关键修改：只有玩家控制的单位才显示
-                // 敌人 (IsPlayerControlled = false) 会直接走 else 分支，清空高亮
                 if (SelectedUnit.IsPlayerControlled && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
                 {
                     HexCoords center = SelectedUnit.Coords;
                     int stride = attrs.Core.CurrentStride;
                     int ap = attrs.Core.CurrentAP;
 
-                    // 免费区
                     var freeSet = new HashSet<HexCoords>();
-                    if (stride > 0)
-                    {
-                        foreach (var c in center.Disk(stride)) freeSet.Add(c);
-                    }
-                    else
-                    {
-                        freeSet.Add(center);
-                    }
+                    if (stride > 0) foreach (var c in center.Disk(stride)) freeSet.Add(c);
+                    else freeSet.Add(center);
 
-                    // 付费区
                     var costSet = new HashSet<HexCoords>();
                     int totalRange = stride + ap;
+
                     if (ap > 0)
                     {
                         foreach (var c in center.Disk(totalRange))
@@ -352,13 +355,11 @@ namespace Game.Battle
                 }
                 else
                 {
-                    // 选中了敌人，清空所有移动高亮
                     highlighter.ApplyMoveRange(null, null);
                 }
                 return;
             }
 
-            // 3. 未选中单位 (Debug 模式)
             if (debugRangeMode != RangeMode.None && _hoverCache.HasValue)
             {
                 var set = new HashSet<HexCoords>();
@@ -371,7 +372,6 @@ namespace Game.Battle
                 return;
             }
 
-            // 默认清空
             highlighter.ApplyMoveRange(null, null);
         }
     }

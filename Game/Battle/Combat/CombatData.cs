@@ -40,12 +40,15 @@ namespace Game.Battle.Combat
     public struct CombatResult
     {
         public bool isHit;
-        public bool isCrit;
+
+        // ⭐ 修复：重命名为 isCritical 以匹配 DamageEffect 的调用
+        public bool isCritical;
+
         public int finalDamage;
 
         public string ToLog()
         {
-            return isHit ? $"{finalDamage}{(isCrit ? " CRIT!" : "")}" : "MISS";
+            return isHit ? $"{finalDamage}{(isCritical ? " CRIT!" : "")}" : "MISS";
         }
     }
 }

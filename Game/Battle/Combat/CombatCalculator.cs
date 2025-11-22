@@ -1,11 +1,29 @@
 using UnityEngine;
 using Game.Units;
-using Game.Common; // 引用 GameRandom
+using Game.Common;
+using Game.Battle.Abilities.Effects; // ⭐ 引用 DamageEffect 所在的命名空间
 
 namespace Game.Battle.Combat
 {
     public static class CombatCalculator
     {
+        // ⭐⭐⭐ 新增：适配器方法，供 DamageEffect 调用 ⭐⭐⭐
+        public static CombatResult CalculateDamage(BattleUnit attacker, BattleUnit defender, DamageEffect effect)
+        {
+            // 1. 将 DamageEffect 的简单数据转换为 DamageConfig
+            // 这里我们做个简单的映射：baseDamage -> basePhysical, scalingFactor -> Str Scaling
+            var config = new DamageConfig();
+
+            config.basePhysical = effect.baseDamage;
+            config.physScaling.Str = effect.scalingFactor; // 假设默认缩放基于力量
+
+            config.variance = 0.1f; // 默认 10% 浮动
+
+            // 2. 调用核心计算逻辑
+            return ResolveAttack(attacker, defender, config);
+        }
+
+        // 核心计算逻辑 (保持不变，只是更新了 isCritical 字段名)
         public static CombatResult ResolveAttack(BattleUnit attacker, BattleUnit defender, DamageConfig config)
         {
             var result = new CombatResult();
@@ -22,8 +40,9 @@ namespace Game.Battle.Combat
             result.isHit = true;
 
             // 2. 暴击 (Crit)
-            result.isCrit = GameRandom.Value < att.Recommended.CritChance;
-            float critMult = result.isCrit ? att.Recommended.CritMult : 1.0f;
+            // ⭐ 修复：使用 isCritical
+            result.isCritical = GameRandom.Value < att.Recommended.CritChance;
+            float critMult = result.isCritical ? att.Recommended.CritMult : 1.0f;
 
             // 3. 浮动 (Variance)
             float variance = 1.0f;

@@ -13,6 +13,8 @@ namespace Game.Battle.Abilities.Effects
         public int baseDamage = 10;
         public float scalingFactor = 1.0f;
 
+        [Header("Damage Configuration")]
+        public DamageConfig config = DamageConfig.Default();
         // ⭐ 修复：返回类型改为 IEnumerator
         public override IEnumerator Apply(BattleUnit source, Ability ability, AbilityContext ctx)
         {
@@ -41,10 +43,12 @@ namespace Game.Battle.Abilities.Effects
             // 结束协程
             yield break;
         }
-
         public override string GetDescription()
         {
-            return $"Deals {baseDamage} + ({scalingFactor:P0} Stats) damage.";
+            string desc = $"Deals {config.basePhysical} Phys";
+            if (config.baseMagical > 0) desc += $" + {config.baseMagical} Mag";
+            desc += " damage.";
+            return desc;
         }
     }
 }

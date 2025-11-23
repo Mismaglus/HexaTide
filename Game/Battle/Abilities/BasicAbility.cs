@@ -1,6 +1,6 @@
 using UnityEngine;
 using Core.Hex;
-using Game.Units;                 // <-- for UnitMover
+using Game.Units;
 
 namespace Game.Battle.Abilities
 {
@@ -9,46 +9,42 @@ namespace Game.Battle.Abilities
     {
         public override bool IsValidTarget(BattleUnit caster, AbilityContext ctx)
         {
-            // 1. 基础检查 (基类检查 Ability.cs 里的通用逻辑)
+            // 1. 基础检查
             if (!base.IsValidTarget(caster, ctx)) return false;
 
-            // BasicAbility 默认逻辑是“必须有一个目标单位”
-            // 如果是空地技能，TargetUnits 可能为空，这里需要根据 targetType 灵活处理
-            // 但为了修复当前报错，我们先假设 BasicAbility 主要是针对单位的技能
+            // 2. 目标类型检查
+            // 如果 Context 里有目标单位，检查单位类型是否匹配
             if (ctx.TargetUnits.Count > 0)
             {
                 var target = ctx.TargetUnits[0];
 
-                // ⭐ 修复核心：使用新的 IsTargetTypeValid 和 targetType
+                // ⭐ 修复：调用新的 API，传入 targetType
                 if (!TargetingResolver.IsTargetTypeValid(caster, target, targetType))
                     return false;
             }
             else
             {
-                // 如果没有目标单位，但技能类型是“针对单位”的，则无效
-                if (targetType == AbilityTargetType.EnemyUnit || targetType == AbilityTargetType.FriendlyUnit)
+                // 如果 Context 里没单位（点的是空地），但技能要求必须有单位 -> 无效
+                if (targetType == AbilityTargetType.EnemyUnit ||
+                    targetType == AbilityTargetType.FriendlyUnit ||
+                    targetType == AbilityTargetType.Self)
+                {
                     return false;
+                }
             }
 
-            // --- 距离检查 ---
-
-            // get caster coords
+            // 3. 距离检查
             HexCoords casterC;
             if (!TryGetUnitCoords(caster, out casterC))
-            {
-                // fallback to context origin if provided by caller
-                casterC = ctx.Origin;
-            }
+                casterC = ctx.Origin; // fallback
 
-            // get target coords
             HexCoords targetC;
+            // 优先取单位坐标，没有则取地块坐标
             if (ctx.TargetUnits.Count > 0 && TryGetUnitCoords(ctx.TargetUnits[0], out targetC))
             {
-                // 优先使用目标单位的坐标
             }
             else if (ctx.TargetTiles.Count > 0)
             {
-                // 如果没有单位，或者取不到坐标，使用选中的地块坐标
                 targetC = ctx.TargetTiles[0];
             }
             else
@@ -57,7 +53,7 @@ namespace Game.Battle.Abilities
             }
 
             int d = casterC.DistanceTo(targetC);
-            return d >= minRange && d <= maxRange; // e.g. 1..1 for melee
+            return d >= minRange && d <= maxRange;
         }
 
         private static bool TryGetUnitCoords(BattleUnit u, out HexCoords c)

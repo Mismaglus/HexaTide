@@ -22,7 +22,7 @@ namespace Game.Battle
 
         [Header("Visuals")]
         public HexHighlighter highlighter;
-        public GridOutlineManager outlineManager; // 假设你已经按照上一步重构了
+        public GridOutlineManager outlineManager;
         public BattleCursor gridCursor;
 
         [Header("Cursors")]
@@ -46,6 +46,7 @@ namespace Game.Battle
             if (!abilityRunner) abilityRunner = FindFirstObjectByType<AbilityRunner>();
             if (!skillBarController) skillBarController = FindFirstObjectByType<SkillBarController>();
             if (!gridCursor) gridCursor = FindFirstObjectByType<BattleCursor>();
+
             if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>();
         }
 
@@ -92,39 +93,33 @@ namespace Game.Battle
             }
 
             if (gridCursor) gridCursor.Hide();
+
+            // 初始状态设为 invalid，直到 hover 到有效目标
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
-        // ⭐ 核心新增：检查目标格的内容是否符合 AbilityTargetType
+        // ⭐ 核心逻辑：检查格子内容是否符合技能要求
         private bool IsTargetContentValid(HexCoords coords)
         {
             if (_currentAbility == null) return false;
 
-            // 1. 先获取该格子上是否有单位
-            selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
+            // 1. 获取施法者自身坐标 (用于 Self 判断)
+            var casterUnit = _caster.GetComponent<Unit>();
+            if (casterUnit == null) return false;
 
-            // 2. 根据类型判断
-            switch (_currentAbility.targetType)
+            // ⭐ Self 特判：如果点击的是自己脚下的格子，无条件通过
+            // (这解决了 0 距离释放技能时，射线打到地块而没打到单位导致验证失败的问题)
+            if (_currentAbility.targetType == AbilityTargetType.Self)
             {
-                case AbilityTargetType.EmptyTile:
-                    // 必须为空
-                    return targetUnit == null;
-
-                case AbilityTargetType.EnemyUnit:
-                    // 必须有单位 且 不是我方控制
-                    return targetUnit != null && !targetUnit.IsPlayerControlled;
-
-                case AbilityTargetType.FriendlyUnit:
-                    // 必须有单位 且 是我方控制
-                    return targetUnit != null && targetUnit.IsPlayerControlled;
-
-                case AbilityTargetType.AnyTile:
-                    // 既然已经在 _validTiles (范围) 检查过了，这里只要在格子上就行，有无单位均可
-                    return true;
-
-                default:
-                    return false;
+                if (coords.Equals(casterUnit.Coords)) return true;
             }
+
+            // 2. 获取目标格子的单位
+            selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
+            BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
+
+            // 3. 调用 Resolver 进行通用判断
+            return TargetingResolver.IsTargetTypeValid(_caster, targetBattleUnit, _currentAbility.targetType);
         }
 
         void HandleHoverChanged(HexCoords? coords)
@@ -133,19 +128,20 @@ namespace Game.Battle
 
             if (coords.HasValue)
             {
-                // 1. 检查是否在距离范围内
+                // A. 范围检查
                 bool inRange = _validTiles.Contains(coords.Value);
 
-                // 2. 检查格子内容是否符合技能要求 (敌/我/空)
+                // B. 内容类型检查 (是敌是友是空?)
                 bool isContentValid = inRange && IsTargetContentValid(coords.Value);
 
                 if (gridCursor)
                 {
-                    // 格子框依然可以显示，但颜色可以区分，或者简单处理：有效才显示绿框/黄框
+                    // 只有完全有效才显示绿色(true)，否则显示红色(false)表示不可用
                     gridCursor.Show(coords.Value, isContentValid);
                 }
 
-                // 3. 只有 范围+内容 都有效，才显示 Target 光标，否则显示 Invalid
+                // C. 光标样式
+                // 需求：如果不符合 Target Type，使用 Invalid 光标
                 var cursorTex = isContentValid ? cursorTarget : cursorInvalid;
                 Cursor.SetCursor(cursorTex, cursorHotspot, CursorMode.Auto);
             }
@@ -167,28 +163,37 @@ namespace Game.Battle
                 return;
             }
 
-            // 2. ⭐ 内容检查 (防止点击无效目标触发技能)
+            // 2. 类型检查
             if (!IsTargetContentValid(coords))
             {
                 Debug.Log($"[Targeting] 目标无效 (类型不匹配: 需要 {_currentAbility.targetType})");
                 return;
             }
 
+            // 3. 构建 Context
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
+            var casterUnit = _caster.GetComponent<Unit>();
+
+            // ⭐ 关键修复：如果是 Self 技能且点在自己脚下，强制把 caster 塞给 target
+            if (_currentAbility.targetType == AbilityTargetType.Self &&
+                coords.Equals(casterUnit.Coords))
+            {
+                targetBattleUnit = _caster;
+            }
 
             var ctx = new AbilityContext
             {
                 Caster = _caster,
-                Origin = _caster.GetComponent<Unit>().Coords
+                Origin = casterUnit.Coords
             };
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
 
-            // (BasicAbility 内部可能还有额外的 IsValidTarget 检查，保留双重验证)
+            // 4. 最终校验 (BasicAbility)
             if (!_currentAbility.IsValidTarget(_caster, ctx))
             {
-                Debug.Log("[Targeting] 目标无效 (Ability.IsValidTarget 返回 false)");
+                Debug.Log("[Targeting] 目标无效 (Ability.IsValidTarget 校验失败)");
                 return;
             }
 
@@ -209,17 +214,22 @@ namespace Game.Battle
             if (gridCursor) gridCursor.Hide();
             highlighter.ClearAll();
 
+            // 还原状态机状态
             if (outlineManager)
             {
                 outlineManager.ClearAbilityRange();
+                // 如果此时还选中了单位，回到移动模式；否则回到空闲模式
                 if (selectionManager != null && selectionManager.SelectedUnit != null)
                     outlineManager.SetState(OutlineState.Movement);
                 else
                     outlineManager.SetState(OutlineState.None);
             }
 
-            if (selectionManager != null) selectionManager.ApplyCursor(null);
-            else Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            // 还原光标 (交给 SelectionManager 接管)
+            if (selectionManager != null)
+                selectionManager.ApplyCursor(null);
+            else
+                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
 
             Debug.Log("[Targeting] 瞄准取消");
         }

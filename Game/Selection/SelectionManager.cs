@@ -74,6 +74,7 @@ namespace Game.Battle
         Unit _hoveredUnit;
         readonly Dictionary<Unit, UnitHighlighter> _HighlighterCache = new();
 
+        [Header("Grid/Occupancy")]
         [SerializeField] private Game.Grid.GridOccupancy occupancy;
 
         void Reset()

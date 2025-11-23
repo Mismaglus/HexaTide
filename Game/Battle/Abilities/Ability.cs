@@ -4,18 +4,9 @@ using UnityEngine;
 
 namespace Game.Battle.Abilities
 {
-    public enum TargetShape { Self, Single, Disk, Ring, Line }
-    // public enum TargetFaction { Any, Ally, Enemy, SelfOnly } // 旧的可以保留或弃用，下面的 TargetType 更全面
+    public enum TargetShape { Self, Single, Disk, Ring, Line, Cone }
     public enum AbilityType { Physical, Magical, Mixed }
-
-    // ⭐ 新增：明确的目标类型定义
-    public enum AbilityTargetType
-    {
-        EnemyUnit,      // 必须有单位，且是敌人
-        FriendlyUnit,   // 必须有单位，且是友军
-        EmptyTile,      // 必须是空地 (无单位)
-        AnyTile         // 只要在范围内，不管有没有人都能放 (例如 AOE)
-    }
+    public enum AbilityTargetType { EnemyUnit, FriendlyUnit, EmptyTile, AnyTile, Self }
 
     public abstract class Ability : ScriptableObject
     {
@@ -29,13 +20,25 @@ namespace Game.Battle.Abilities
         [Min(0)] public int mpCost = 0;
         public int cooldownTurns = 0;
 
-        [Header("Targeting")]
-        public AbilityTargetType targetType = AbilityTargetType.EnemyUnit; // ⭐ 新增字段
-        public TargetShape shape = TargetShape.Single;
-        // public TargetFaction targetFaction = TargetFaction.Enemy; // 建议用 targetType 替代此逻辑
+        [Header("Targeting Input")]
+        // 这里定义“光标能点哪里”
+        public AbilityTargetType targetType = AbilityTargetType.EnemyUnit;
         public int minRange = 1;
         public int maxRange = 1;
         public bool requiresLoS = false;
+
+        [Header("Area of Effect (AOE)")]
+        // 这里定义“实际打哪里”
+        public TargetShape shape = TargetShape.Single;
+
+        [Tooltip("影响半径 (0 = 仅中心, 1 = 周围一圈)")]
+        [Min(0)] public int aoeRadius = 0;
+
+        [Header("Target Filtering")]
+        // 这里定义“会打到谁”
+        public bool affectEnemies = true;
+        public bool affectAllies = false;
+        public bool affectSelf = false; // 旋风斩的关键：选 False 就不会砍自己
 
         [Header("Classification")]
         public AbilityType abilityType = AbilityType.Physical;

@@ -26,9 +26,9 @@ namespace Game.Battle
         public AbilityTargetingSystem targetingSystem;
         public BattleRules battleRules;
 
-        [Header("Visuals (Outlines & Cursors)")]
-        public RangeOutlineDrawer moveFreeDrawer;
-        public RangeOutlineDrawer moveCostDrawer;
+        [Header("Visuals Manager")]
+        // ⭐ 替换了原来的 RangeOutlineDrawer 引用
+        public GridOutlineManager outlineManager;
         public BattleCursor gridCursor;
 
         [Header("Range Settings")]
@@ -37,8 +37,8 @@ namespace Game.Battle
         [Min(0)] public int radius = 2;
 
         [Header("Mouse Icons")]
-        public Texture2D cursorDefault;         // 常驻默认光标
-        public Texture2D cursorHoverSelectable; // 悬停在任何单位（敌/我/中立）时的光标
+        public Texture2D cursorDefault;
+        public Texture2D cursorHoverSelectable;
         public Texture2D cursorMoveFree;
         public Texture2D cursorMoveCost;
         public Texture2D cursorInvalid;
@@ -81,6 +81,7 @@ namespace Game.Battle
             if (!input) input = FindFirstObjectByType<BattleHexInput>(FindObjectsInactive.Exclude);
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(FindObjectsInactive.Exclude);
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>(FindObjectsInactive.Exclude);
+            if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>(FindObjectsInactive.Exclude);
         }
 
         void Awake()
@@ -88,35 +89,27 @@ namespace Game.Battle
             if (_battleSM == null) _battleSM = FindFirstObjectByType<BattleStateMachine>();
             if (targetingSystem == null) targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>();
             if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
-
             if (gridCursor == null) gridCursor = FindFirstObjectByType<BattleCursor>();
+
+            // 自动查找 OutlineManager
+            if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
         }
 
         void Start()
         {
-            // 1. 尝试从 BattleController 获取全局默认光标 (如果本地没配)
             if (cursorDefault == null)
             {
                 var bc = FindFirstObjectByType<BattleController>();
                 if (bc != null) cursorDefault = bc.defaultCursor;
             }
-
-            // 2. 游戏开始时强制应用一次默认光标，实现常驻
             ApplyCursor(cursorDefault);
         }
 
-        /// <summary>
-        /// 统一应用光标，处理 Hotspot 和 Null 回退
-        /// </summary>
         public void ApplyCursor(Texture2D tex)
         {
-            // 如果传入 null，回退到 Default；如果 Default 也没有，才用系统箭头
             var target = tex ? tex : cursorDefault;
-
-            if (target != null)
-                Cursor.SetCursor(target, cursorHotspot, CursorMode.Auto);
-            else
-                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            if (target != null) Cursor.SetCursor(target, cursorHotspot, CursorMode.Auto);
+            else Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
         }
 
         void Update()
@@ -134,7 +127,6 @@ namespace Game.Battle
 
         void OnEnable()
         {
-            if (!input) input = FindFirstObjectByType<BattleHexInput>(FindObjectsInactive.Exclude);
             if (input != null)
             {
                 input.OnTileClicked += OnTileClicked;
@@ -225,24 +217,21 @@ namespace Game.Battle
             GetHighlighter(current)?.SetSelected(false);
 
             _selected = null;
-
             highlighter.SetSelected(null);
-            ClearVisuals();
 
-            // ⭐ 还原为默认光标，而不是 null
+            // ⭐ 只是通知 Manager 清除，并切回无状态
+            if (outlineManager)
+            {
+                outlineManager.ClearMovementRange();
+                outlineManager.SetState(OutlineState.None);
+            }
+            if (gridCursor) gridCursor.Hide();
+
             ApplyCursor(cursorDefault);
-
             SelectedUnit = null;
 
             if (_hoveredUnit != null && _hoveredUnit != SelectedUnit)
                 GetHighlighter(_hoveredUnit)?.SetHover(true);
-        }
-
-        void ClearVisuals()
-        {
-            if (moveFreeDrawer) moveFreeDrawer.Hide();
-            if (moveCostDrawer) moveCostDrawer.Hide();
-            if (gridCursor) gridCursor.Hide();
         }
 
         public void RegisterUnit(Unit u) { if (u == null) return; occupancy?.Register(u); RemoveUnitMapping(u); _units[u.Coords] = u; u.OnMoveFinished -= OnUnitMoveFinished; u.OnMoveFinished += OnUnitMoveFinished; _ = GetHighlighter(u); }
@@ -251,12 +240,9 @@ namespace Game.Battle
         void RemoveUnitMapping(Unit u) { HexCoords keyToRemove = default; bool found = false; foreach (var kv in _units) { if (kv.Value == u) { keyToRemove = kv.Key; found = true; break; } } if (found) _units.Remove(keyToRemove); }
         public bool IsOccupied(HexCoords c) => HasUnitAt(c);
 
-
-        // —— Input Callbacks (核心逻辑修改处) ——
-
         void OnHoverChanged(HexCoords? h)
         {
-            // 0. 技能释放模式：完全交由 AbilityTargetingSystem 接管，此处不干涉
+            // 如果 TargetingSystem 正在工作，它会接管状态，这里只负责更新 HoverCache
             if (targetingSystem != null && targetingSystem.IsTargeting)
             {
                 if (_hoverCache.HasValue)
@@ -269,22 +255,15 @@ namespace Game.Battle
             }
 
             _hoverCache = h;
-
-            // 预判：这帧下面有没有单位？
             Unit unitUnderMouse = null;
             if (h.HasValue) TryGetUnitAt(h.Value, out unitUnderMouse);
 
-            // --- 光标逻辑开始 ---
-
-            // 1. 只要鼠标下有单位 (不管敌我、不管是否已选中别人)，优先显示“可交互/选中”手势
+            // === 光标逻辑 ===
             if (unitUnderMouse != null)
             {
-                // 单位本身会阻挡视线，所以这里通常不需要显示地面格子框，或者看你喜好
                 if (gridCursor) gridCursor.Hide();
-
                 ApplyCursor(cursorHoverSelectable);
             }
-            // 2. 如果下面没单位，且当前已选中了我方单位 -> 显示移动规划光标
             else if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
                 HexCoords pos = h.Value;
@@ -298,22 +277,15 @@ namespace Game.Battle
                 else if (isCost) ApplyCursor(cursorMoveCost);
                 else ApplyCursor(cursorInvalid);
             }
-            // 3. 既没单位，也没选中人 (或移出了地图) -> 还原默认光标
             else
             {
                 if (gridCursor) gridCursor.Hide();
                 ApplyCursor(cursorDefault);
             }
-            // --- 光标逻辑结束 ---
 
-
-            // ... 原有的高亮器逻辑 (描边) ...
+            // ... Highlighter ...
             Unit newHover = unitUnderMouse;
-            if (ReferenceEquals(newHover, _hoveredUnit))
-            {
-                if (SelectedUnit == null && debugRangeMode != RangeMode.None) RecalcRange();
-                return;
-            }
+            if (ReferenceEquals(newHover, _hoveredUnit)) return;
             if (_hoveredUnit != null)
             {
                 var vOld = GetHighlighter(_hoveredUnit);
@@ -327,7 +299,6 @@ namespace Game.Battle
                 else { vNew?.SetHover(true); }
             }
             _hoveredUnit = newHover;
-            if (SelectedUnit == null && debugRangeMode != RangeMode.None) RecalcRange();
         }
 
         void OnTileClicked(HexCoords c)
@@ -372,7 +343,7 @@ namespace Game.Battle
         {
             _currentFreeSet.Clear();
             _currentCostSet.Clear();
-            ClearVisuals();
+            if (gridCursor) gridCursor.Hide();
 
             if (targetingSystem != null && targetingSystem.IsTargeting) return;
 
@@ -396,22 +367,27 @@ namespace Game.Battle
                         }
                     }
 
-                    if (moveFreeDrawer) moveFreeDrawer.Show(_currentFreeSet);
-                    if (moveCostDrawer) moveCostDrawer.Show(_currentCostSet);
+                    // ⭐ 更新 Manager 数据并请求移动状态
+                    if (outlineManager)
+                    {
+                        outlineManager.SetMovementRange(_currentFreeSet, _currentCostSet);
+                        outlineManager.SetState(OutlineState.Movement);
+                    }
 
-                    // 刷新光标状态
                     if (_hoverCache.HasValue) OnHoverChanged(_hoverCache);
                 }
                 return;
             }
 
-            if (debugRangeMode != RangeMode.None && _hoverCache.HasValue)
+            if (debugRangeMode != RangeMode.None && _hoverCache.HasValue && outlineManager)
             {
                 var set = new HashSet<HexCoords>();
                 if (debugRangeMode == RangeMode.Disk) foreach (var c in _hoverCache.Value.Disk(debugRadius)) set.Add(c);
                 else foreach (var c in _hoverCache.Value.Ring(debugRadius)) set.Add(c);
 
-                if (moveFreeDrawer) moveFreeDrawer.Show(set);
+                // Debug 模式暂用 FreeDrawer 显示
+                outlineManager.SetMovementRange(set, null);
+                outlineManager.SetState(OutlineState.Movement);
             }
         }
     }

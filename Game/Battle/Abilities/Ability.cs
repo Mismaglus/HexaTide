@@ -5,8 +5,17 @@ using UnityEngine;
 namespace Game.Battle.Abilities
 {
     public enum TargetShape { Self, Single, Disk, Ring, Line }
-    public enum TargetFaction { Any, Ally, Enemy, SelfOnly }
+    // public enum TargetFaction { Any, Ally, Enemy, SelfOnly } // 旧的可以保留或弃用，下面的 TargetType 更全面
     public enum AbilityType { Physical, Magical, Mixed }
+
+    // ⭐ 新增：明确的目标类型定义
+    public enum AbilityTargetType
+    {
+        EnemyUnit,      // 必须有单位，且是敌人
+        FriendlyUnit,   // 必须有单位，且是友军
+        EmptyTile,      // 必须是空地 (无单位)
+        AnyTile         // 只要在范围内，不管有没有人都能放 (例如 AOE)
+    }
 
     public abstract class Ability : ScriptableObject
     {
@@ -17,12 +26,13 @@ namespace Game.Battle.Abilities
 
         [Header("Costs")]
         public int apCost = 1;
-        [Min(0)] public int mpCost = 0; // ⭐ 确保这里填了数值
+        [Min(0)] public int mpCost = 0;
         public int cooldownTurns = 0;
 
         [Header("Targeting")]
+        public AbilityTargetType targetType = AbilityTargetType.EnemyUnit; // ⭐ 新增字段
         public TargetShape shape = TargetShape.Single;
-        public TargetFaction targetFaction = TargetFaction.Enemy;
+        // public TargetFaction targetFaction = TargetFaction.Enemy; // 建议用 targetType 替代此逻辑
         public int minRange = 1;
         public int maxRange = 1;
         public bool requiresLoS = false;
@@ -44,35 +54,15 @@ namespace Game.Battle.Abilities
         public string animStateTag = string.Empty;
         public float animWaitTimeout = 5f;
 
-        // ⭐ 核心检查逻辑 (带 Debug)
         public virtual bool CanUse(BattleUnit caster)
         {
             if (caster == null) return false;
-
-            // 1. 检查 AP
-            if (caster.CurAP < apCost)
-            {
-                // Debug.Log($"[Ability] AP 不足: {caster.name} 只有 {caster.CurAP}, 需要 {apCost}");
-                return false;
-            }
-
-            // 2. 检查 MP
+            if (caster.CurAP < apCost) return false;
             if (mpCost > 0)
             {
-                if (caster.Attributes == null)
-                {
-                    Debug.LogError($"[Ability] {caster.name} 缺少 UnitAttributes 组件！");
-                    return false;
-                }
-
-                if (caster.Attributes.Core.MP < mpCost)
-                {
-                    // 🔴 这里就是你没反应的原因！
-                    Debug.Log($"[Ability] MP 不足: {caster.name} 只有 {caster.Attributes.Core.MP}, 需要 {mpCost}");
-                    return false;
-                }
+                if (caster.Attributes == null) return false;
+                if (caster.Attributes.Core.MP < mpCost) return false;
             }
-
             return true;
         }
 
@@ -80,23 +70,12 @@ namespace Game.Battle.Abilities
 
         public virtual IEnumerator Execute(BattleUnit caster, AbilityContext ctx, AbilityRunner runner)
         {
-            // 如果检查失败，直接退出 (这也是为什么你没看到后续 Log)
-            if (!CanUse(caster))
-            {
-                Debug.LogWarning("[Ability] Execute 被终止: 资源不足。");
-                yield break;
-            }
-            if (!IsValidTarget(caster, ctx))
-            {
-                Debug.LogWarning("[Ability] Execute 被终止: 目标无效。");
-                yield break;
-            }
+            if (!CanUse(caster)) yield break;
+            if (!IsValidTarget(caster, ctx)) yield break;
 
-            // ⭐ 真正扣除资源
             caster.TrySpendAP(apCost);
             if (mpCost > 0) caster.TrySpendMP(mpCost);
 
-            // 执行效果
             yield return runner.PerformEffects(caster, this, ctx, effects);
         }
     }

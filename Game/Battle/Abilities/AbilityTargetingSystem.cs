@@ -22,7 +22,7 @@ namespace Game.Battle
 
         [Header("Visuals")]
         public HexHighlighter highlighter;
-        public RangeOutlineDrawer rangeDrawer;
+        public GridOutlineManager outlineManager; // 假设你已经按照上一步重构了
         public BattleCursor gridCursor;
 
         [Header("Cursors")]
@@ -45,9 +45,8 @@ namespace Game.Battle
             if (!actionQueue) actionQueue = FindFirstObjectByType<ActionQueue>();
             if (!abilityRunner) abilityRunner = FindFirstObjectByType<AbilityRunner>();
             if (!skillBarController) skillBarController = FindFirstObjectByType<SkillBarController>();
-
-            if (!rangeDrawer) rangeDrawer = FindFirstObjectByType<RangeOutlineDrawer>();
             if (!gridCursor) gridCursor = FindFirstObjectByType<BattleCursor>();
+            if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>();
         }
 
         void OnEnable()
@@ -79,16 +78,53 @@ namespace Game.Battle
             _currentAbility = ability;
             _validTiles.Clear();
 
-            Debug.Log($"[Targeting] 进入瞄准: {_currentAbility.name}");
+            Debug.Log($"[Targeting] 进入瞄准: {_currentAbility.name} ({_currentAbility.targetType})");
 
             var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
             foreach (var t in rangeTiles) _validTiles.Add(t);
 
-            // 视觉切换
             highlighter.ClearAll();
-            if (rangeDrawer) rangeDrawer.Show(_validTiles);
+
+            if (outlineManager)
+            {
+                outlineManager.SetAbilityRange(_validTiles);
+                outlineManager.SetState(OutlineState.AbilityTargeting);
+            }
+
             if (gridCursor) gridCursor.Hide();
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
+        }
+
+        // ⭐ 核心新增：检查目标格的内容是否符合 AbilityTargetType
+        private bool IsTargetContentValid(HexCoords coords)
+        {
+            if (_currentAbility == null) return false;
+
+            // 1. 先获取该格子上是否有单位
+            selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
+
+            // 2. 根据类型判断
+            switch (_currentAbility.targetType)
+            {
+                case AbilityTargetType.EmptyTile:
+                    // 必须为空
+                    return targetUnit == null;
+
+                case AbilityTargetType.EnemyUnit:
+                    // 必须有单位 且 不是我方控制
+                    return targetUnit != null && !targetUnit.IsPlayerControlled;
+
+                case AbilityTargetType.FriendlyUnit:
+                    // 必须有单位 且 是我方控制
+                    return targetUnit != null && targetUnit.IsPlayerControlled;
+
+                case AbilityTargetType.AnyTile:
+                    // 既然已经在 _validTiles (范围) 检查过了，这里只要在格子上就行，有无单位均可
+                    return true;
+
+                default:
+                    return false;
+            }
         }
 
         void HandleHoverChanged(HexCoords? coords)
@@ -97,10 +133,20 @@ namespace Game.Battle
 
             if (coords.HasValue)
             {
-                bool isValid = _validTiles.Contains(coords.Value);
-                if (gridCursor) gridCursor.Show(coords.Value, isValid);
+                // 1. 检查是否在距离范围内
+                bool inRange = _validTiles.Contains(coords.Value);
 
-                var cursorTex = isValid ? cursorTarget : cursorInvalid;
+                // 2. 检查格子内容是否符合技能要求 (敌/我/空)
+                bool isContentValid = inRange && IsTargetContentValid(coords.Value);
+
+                if (gridCursor)
+                {
+                    // 格子框依然可以显示，但颜色可以区分，或者简单处理：有效才显示绿框/黄框
+                    gridCursor.Show(coords.Value, isContentValid);
+                }
+
+                // 3. 只有 范围+内容 都有效，才显示 Target 光标，否则显示 Invalid
+                var cursorTex = isContentValid ? cursorTarget : cursorInvalid;
                 Cursor.SetCursor(cursorTex, cursorHotspot, CursorMode.Auto);
             }
             else
@@ -114,9 +160,17 @@ namespace Game.Battle
         {
             if (!IsTargeting) return;
 
+            // 1. 范围检查
             if (!_validTiles.Contains(coords))
             {
                 Debug.Log("[Targeting] 目标无效 (超出范围)");
+                return;
+            }
+
+            // 2. ⭐ 内容检查 (防止点击无效目标触发技能)
+            if (!IsTargetContentValid(coords))
+            {
+                Debug.Log($"[Targeting] 目标无效 (类型不匹配: 需要 {_currentAbility.targetType})");
                 return;
             }
 
@@ -131,9 +185,10 @@ namespace Game.Battle
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
 
+            // (BasicAbility 内部可能还有额外的 IsValidTarget 检查，保留双重验证)
             if (!_currentAbility.IsValidTarget(_caster, ctx))
             {
-                Debug.Log("[Targeting] 目标无效 (不符合技能条件)");
+                Debug.Log("[Targeting] 目标无效 (Ability.IsValidTarget 返回 false)");
                 return;
             }
 
@@ -151,20 +206,20 @@ namespace Game.Battle
             _caster = null;
             _validTiles.Clear();
 
-            if (rangeDrawer) rangeDrawer.Hide();
             if (gridCursor) gridCursor.Hide();
             highlighter.ClearAll();
 
-            // ⭐ 修复：不再设为 null，而是调用 SelectionManager 的还原方法
-            if (selectionManager != null)
+            if (outlineManager)
             {
-                // 使用 Default 或 SelectionManager 自己判断当前状态
-                selectionManager.ApplyCursor(null); // 传入 null 会自动回退到 cursorDefault
+                outlineManager.ClearAbilityRange();
+                if (selectionManager != null && selectionManager.SelectedUnit != null)
+                    outlineManager.SetState(OutlineState.Movement);
+                else
+                    outlineManager.SetState(OutlineState.None);
             }
-            else
-            {
-                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
-            }
+
+            if (selectionManager != null) selectionManager.ApplyCursor(null);
+            else Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
 
             Debug.Log("[Targeting] 瞄准取消");
         }

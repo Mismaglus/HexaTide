@@ -6,7 +6,7 @@ using Game.Units;
 using Game.Battle.Abilities;
 using Game.Battle.Actions;
 using Game.UI;
-using UnityEngine.InputSystem; // ⭐ 必须引用
+using UnityEngine.InputSystem;
 
 namespace Game.Battle
 {
@@ -155,7 +155,17 @@ namespace Game.Battle
             if (gridCursor) gridCursor.Hide();
             highlighter.ClearAll();
 
-            Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            // ⭐ 修复：不再设为 null，而是调用 SelectionManager 的还原方法
+            if (selectionManager != null)
+            {
+                // 使用 Default 或 SelectionManager 自己判断当前状态
+                selectionManager.ApplyCursor(null); // 传入 null 会自动回退到 cursorDefault
+            }
+            else
+            {
+                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            }
+
             Debug.Log("[Targeting] 瞄准取消");
         }
 
@@ -163,7 +173,6 @@ namespace Game.Battle
         {
             if (IsTargeting)
             {
-                // ⭐ 修复：使用新输入系统检测右键
                 if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                 {
                     CancelTargeting();

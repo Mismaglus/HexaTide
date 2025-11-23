@@ -22,7 +22,10 @@ namespace Core.Hex
             var verts = new List<Vector3>();
             var tris = new List<int>();
 
-            float innerScale = Mathf.Max(0.0001f, (outerRadius - borderWidth) / outerRadius);
+            // Uniform stroke: clamp and use half width on both sides of the edge normal
+            float apothem = outerRadius * (0.5f * HexMetrics.SQRT3);
+            float clampedWidth = Mathf.Clamp(borderWidth, 0.0001f, apothem - 0.0001f);
+            float halfWidth = clampedWidth * 0.5f;
             float y = yOffset + tileThickness * 0.5f;
 
             // 先计算用于居中的边界（只看存在的格子）
@@ -51,12 +54,10 @@ namespace Core.Hex
 
                     // 外/内 六角
                     Vector3[] outerP = new Vector3[6];
-                    Vector3[] innerP = new Vector3[6];
                     for (int i = 0; i < 6; i++)
                     {
                         var d = HexMetrics.CORNER_DIRS[i];
                         outerP[i] = center + new Vector3(d.x * outerRadius, 0f, d.y * outerRadius);
-                        innerP[i] = center + new Vector3(d.x * outerRadius * innerScale, 0f, d.y * outerRadius * innerScale);
                     }
 
                     // 决定该格需要绘制哪些边
@@ -85,11 +86,25 @@ namespace Core.Hex
 
                         int ni = (i + 1) % 6;
 
+                        // 以边法线偏移固定宽度，避免缩放导致的角落加粗
+                        Vector3 a = outerP[i];
+                        Vector3 b = outerP[ni];
+                        Vector3 normal = ((a + b) * 0.5f - center);
+                        normal.y = 0f;
+                        float mag = normal.magnitude;
+                        if (mag < 0.0001f) continue;
+                        normal /= mag;
+
+                        Vector3 outerA = a + normal * halfWidth;
+                        Vector3 outerB = b + normal * halfWidth;
+                        Vector3 innerA = a - normal * halfWidth;
+                        Vector3 innerB = b - normal * halfWidth;
+
                         int baseIndex = verts.Count;
-                        verts.Add(outerP[i]);   // 0
-                        verts.Add(outerP[ni]);  // 1
-                        verts.Add(innerP[i]);   // 2
-                        verts.Add(innerP[ni]);  // 3
+                        verts.Add(outerA);   // 0
+                        verts.Add(outerB);   // 1
+                        verts.Add(innerA);   // 2
+                        verts.Add(innerB);   // 3
 
                         // 双面透明材质下，三角顺序只需一致
                         tris.Add(baseIndex + 0);
@@ -105,7 +120,10 @@ namespace Core.Hex
             var mesh = new Mesh { name = $"HexBorders_{mode}" };
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
-            mesh.RecalculateNormals();
+            // 所有边都在同一平面上，手动指定法线避免插值产生阴影
+            var normals = new List<Vector3>(verts.Count);
+            for (int i = 0; i < verts.Count; i++) normals.Add(Vector3.up);
+            mesh.SetNormals(normals);
             mesh.RecalculateBounds();   // ⭐️ 新增，确保包围盒覆盖最外缘线段
             return mesh;
         }

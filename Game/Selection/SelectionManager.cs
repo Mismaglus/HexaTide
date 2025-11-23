@@ -37,6 +37,8 @@ namespace Game.Battle
         [Min(0)] public int radius = 2;
 
         [Header("Mouse Icons")]
+        public Texture2D cursorDefault;         // ⭐ 新增：默认常驻光标
+        public Texture2D cursorHoverSelectable; // ⭐ 新增：悬停在可选单位上的光标
         public Texture2D cursorMoveFree;
         public Texture2D cursorMoveCost;
         public Texture2D cursorInvalid;
@@ -72,6 +74,8 @@ namespace Game.Battle
         Unit _hoveredUnit;
         readonly Dictionary<Unit, UnitHighlighter> _HighlighterCache = new();
 
+        [SerializeField] private Game.Grid.GridOccupancy occupancy;
+
         void Reset()
         {
             if (!input) input = FindFirstObjectByType<BattleHexInput>(FindObjectsInactive.Exclude);
@@ -86,6 +90,31 @@ namespace Game.Battle
             if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
 
             if (gridCursor == null) gridCursor = FindFirstObjectByType<BattleCursor>();
+        }
+
+        void Start()
+        {
+            // ⭐ 1. 尝试从 BattleController 获取全局默认光标
+            if (cursorDefault == null)
+            {
+                var bc = FindFirstObjectByType<BattleController>();
+                if (bc != null) cursorDefault = bc.defaultCursor;
+            }
+
+            // ⭐ 2. 初始应用一次
+            ApplyCursor(cursorDefault);
+        }
+
+        // ⭐ 统一管理光标应用的方法
+        public void ApplyCursor(Texture2D tex)
+        {
+            // 如果传入 null，尝试回退到 Default，如果 Default 也没有，才用系统默认
+            var target = tex ? tex : cursorDefault;
+
+            if (target != null)
+                Cursor.SetCursor(target, cursorHotspot, CursorMode.Auto);
+            else
+                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
         }
 
         void Update()
@@ -118,8 +147,6 @@ namespace Game.Battle
                 input.OnHoverChanged -= OnHoverChanged;
             }
         }
-
-        [SerializeField] private Game.Grid.GridOccupancy occupancy;
 
         public bool HasUnitAt(HexCoords c)
         {
@@ -200,7 +227,8 @@ namespace Game.Battle
             highlighter.SetSelected(null);
             ClearVisuals();
 
-            Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            // ⭐ 修复：取消选中时，恢复默认样式，而不是 null
+            ApplyCursor(cursorDefault);
 
             SelectedUnit = null;
 
@@ -226,6 +254,7 @@ namespace Game.Battle
 
         void OnHoverChanged(HexCoords? h)
         {
+            // 如果正在释放技能，交由 AbilityTargetingSystem 接管
             if (targetingSystem != null && targetingSystem.IsTargeting)
             {
                 if (_hoverCache.HasValue)
@@ -239,35 +268,45 @@ namespace Game.Battle
 
             _hoverCache = h;
 
-            // 处理移动光标 & 线框
+            // 检测鼠标下方的单位
+            Unit unitUnderMouse = null;
+            if (h.HasValue) TryGetUnitAt(h.Value, out unitUnderMouse);
+
+            // === ⭐ 光标样式逻辑 ===
             if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
+                // A. 移动规划模式
                 HexCoords pos = h.Value;
                 bool isFree = _currentFreeSet.Contains(pos);
                 bool isCost = _currentCostSet.Contains(pos);
                 bool isValid = isFree || isCost;
 
-                // ⭐ 修复点：无论是否有效，只要在网格上，都显示线框
-                // 有效传 true (绿/橙)，无效传 false (红)
                 if (gridCursor) gridCursor.Show(pos, isValid);
 
-                // 切换鼠标图标
-                if (isFree) Cursor.SetCursor(cursorMoveFree, cursorHotspot, CursorMode.Auto);
-                else if (isCost) Cursor.SetCursor(cursorMoveCost, cursorHotspot, CursorMode.Auto);
-                else Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
+                if (isFree) ApplyCursor(cursorMoveFree);
+                else if (isCost) ApplyCursor(cursorMoveCost);
+                else ApplyCursor(cursorInvalid);
             }
             else
             {
-                // 没选中人，或者鼠标移出地图 -> 隐藏线框
+                // B. 空闲模式 (无选中或选中敌人)
                 if (gridCursor) gridCursor.Hide();
 
-                // 恢复默认光标
-                if (SelectedUnit == null) Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+                // 如果鼠标悬停在“可选中的单位”上 -> 切换为 Selectable 样式
+                if (unitUnderMouse != null && battleRules != null && battleRules.CanSelect(unitUnderMouse))
+                {
+                    ApplyCursor(cursorHoverSelectable);
+                }
+                else
+                {
+                    // 否则 -> 保持默认常驻样式
+                    ApplyCursor(cursorDefault);
+                }
             }
+            // === 逻辑结束 ===
 
             // ... Unit Highlighter logic ...
-            Unit newHover = null;
-            if (h.HasValue) TryGetUnitAt(h.Value, out newHover);
+            Unit newHover = unitUnderMouse;
             if (ReferenceEquals(newHover, _hoveredUnit))
             {
                 if (SelectedUnit == null && debugRangeMode != RangeMode.None) RecalcRange();

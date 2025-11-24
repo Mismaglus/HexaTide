@@ -1,11 +1,10 @@
 using Core.Hex;
-using Game.Core; // 引用 FactionMembership
+using Game.Core;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Battle;
-using Game.Battle.Units;
-using Game.Grid;
+using Game.Battle; // 引用 SelectionManager
+using Game.Grid;   // 引用 IHexGridProvider
 
 namespace Game.Units
 {
@@ -17,7 +16,6 @@ namespace Game.Units
         public Sprite portrait;
 
         [Header("Faction")]
-        // ? 唯一阵营数据源
         [SerializeField] private FactionMembership _faction;
         public FactionMembership Faction => _faction ? _faction : (_faction = GetComponent<FactionMembership>());
 
@@ -36,6 +34,8 @@ namespace Game.Units
 
         public HexCoords Coords { get; private set; }
         public bool IsMoving => _moveRoutine != null;
+
+        // 这个事件现在既可以是 Unit 自己移动触发，也可以是 UnitMover 触发
         public System.Action<Unit, HexCoords, HexCoords> OnMoveFinished;
 
         Dictionary<HexCoords, Transform> _tileMap = new();
@@ -43,6 +43,7 @@ namespace Game.Units
         Coroutine _moveRoutine;
         bool _hasValidCoords;
         UnitVisual2D _visual2D;
+        UnitMover _moverComponent; // ? 新增缓存
 
         void Awake()
         {
@@ -50,14 +51,33 @@ namespace Game.Units
             _visual2D = GetComponentInChildren<UnitVisual2D>(true);
             EnsureChildAnimatorController();
 
-            // 确保 Faction 组件存在
             if (!_faction) _faction = GetComponent<FactionMembership>();
+
+            // ? 核心修改：监听 UnitMover 的移动事件
+            // 这样战斗系统驱动的移动也能正确通知 GridOccupancy
+            _moverComponent = GetComponent<UnitMover>();
+            if (_moverComponent != null)
+            {
+                _moverComponent.OnMoveFinished += HandleMoverFinished;
+            }
         }
 
-        // ... (Start, Update, Move 逻辑保持不变，因为太长了我不重复贴，请保留原有的移动逻辑代码) ...
-        // 如果你需要我完整贴出 Unit.cs 的移动逻辑，请告诉我。
-        // 为了方便直接替换，这里只包含了开头结构修改。
-        // ? 考虑到你要直接替换，我还是贴完整版吧，以免出错。
+        void OnDestroy()
+        {
+            if (_moverComponent != null)
+            {
+                _moverComponent.OnMoveFinished -= HandleMoverFinished;
+            }
+        }
+
+        // ? 当 UnitMover 完成一步时，同步更新 Coords 并转发事件
+        void HandleMoverFinished(HexCoords from, HexCoords to)
+        {
+            // 确保 Unit 自己的坐标数据是最新的
+            Coords = to;
+            // 转发给 GridOccupancy 和 SelectionManager
+            OnMoveFinished?.Invoke(this, from, to);
+        }
 
         void EnsureChildAnimatorController()
         {
@@ -80,8 +100,12 @@ namespace Game.Units
             if (grid == null) grid = FindFirstGridProviderInScene();
             if (grid == null) return;
             if (_tileMap.Count == 0) RebuildTileMap();
+
+            // 尝试定位初始位置
             if (TryPickTileUnderSelf(out var c)) WarpTo(c);
             else _hasValidCoords = _tileMap.ContainsKey(Coords);
+
+            // 自动注册到 SelectionManager (进而注册到 Occupancy)
             var sel = FindFirstObjectByType<SelectionManager>(FindObjectsInactive.Exclude);
             sel?.RegisterUnit(this);
         }
@@ -140,6 +164,7 @@ namespace Game.Units
             if (TryGetTileTopWorld(c, out var top)) { transform.position = top; _hasValidCoords = true; }
         }
 
+        // 这个是 Unit 自己简单的移动逻辑 (非战斗用)
         public bool TryMoveTo(HexCoords target)
         {
             if (IsMoving || grid == null) return false;
@@ -166,6 +191,8 @@ namespace Game.Units
                 yield return null;
             }
             var from = Coords; Coords = target; _moveRoutine = null;
+
+            // 这里的 Invoke 主要是给非战斗移动用的
             OnMoveFinished?.Invoke(this, from, target);
         }
 

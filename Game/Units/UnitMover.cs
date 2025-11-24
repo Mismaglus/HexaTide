@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
 using Game.Grid;
+using Game.Battle; // ⭐ 增加引用，为了调用 BattleIntentSystem
 
 namespace Game.Units
 {
@@ -11,6 +12,7 @@ namespace Game.Units
     [RequireComponent(typeof(UnitAttributes))]
     public class UnitMover : MonoBehaviour
     {
+        // ... (之前的变量保持不变) ...
         // 只读属性，兼容性访问
         public int strideLeft => _attributes != null ? _attributes.Core.CurrentStride : 0;
 
@@ -38,8 +40,6 @@ namespace Game.Units
 
         public event Action<HexCoords, HexCoords> OnMoveStarted;
         public event Action<HexCoords, HexCoords> OnMoveFinished;
-
-        // ⭐ 新增：路径移动完成事件 (SelectionManager 可监听此事件来刷新范围)
         public event Action OnPathCompleted;
 
         [SerializeField] private MonoBehaviour _gridProviderObject;
@@ -86,7 +86,6 @@ namespace Game.Units
             transform.position = top;
         }
 
-        // ⭐⭐⭐ 核心新增：沿路径移动 ⭐⭐⭐
         public void FollowPath(List<HexCoords> path, Action onComplete = null)
         {
             if (IsMoving || path == null || path.Count == 0) return;
@@ -100,42 +99,43 @@ namespace Game.Units
 
             foreach (var nextStep in path)
             {
-                // 1. 再次检查下一步是否合法 (防止动态障碍)
                 if (!CanStepTo(nextStep))
                 {
-                    Debug.LogWarning("[UnitMover] Path interrupted (blocked or out of resources).");
+                    Debug.LogWarning("[UnitMover] Path interrupted.");
                     break;
                 }
 
-                // 2. 扣费
                 int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(nextStep)) : 1;
                 ConsumeResources(cost);
 
-                // 3. 执行单步动画
                 yield return StartCoroutine(CoMoveLerpOnly(_mCoords, nextStep, secondsPerTile));
 
-                // 4. 更新逻辑坐标
                 if (_unit) _unit.WarpTo(nextStep);
                 else _mCoords = nextStep;
 
-                // 5. 触发单步完成事件 (用于刷新 SelectionManager 或触发陷阱)
-                // 注意：这里 from 参数此时已经不准确了，但这通常用于 UI 刷新，影响不大
                 OnMoveFinished?.Invoke(nextStep, nextStep);
             }
 
             IsMoving = false;
             OnPathCompleted?.Invoke();
+
+            // ⭐⭐ 新增：移动完全结束后，通知意图系统更新敌人预警
+            if (BattleIntentSystem.Instance != null)
+            {
+                BattleIntentSystem.Instance.UpdateIntents();
+            }
+            // ⭐⭐
+
             onComplete?.Invoke();
         }
+
+        // ... (其余代码保持不变: ConsumeResources, CoMoveLerpOnly, TryStepTo, CanStepTo, RebuildTileCache, TryGetTileTopWorld) ...
+        // 请保留你原本文件里的这些辅助方法，这里为了简洁省略了
 
         void ConsumeResources(int cost)
         {
             if (_attributes == null) return;
-
-            if (_attributes.Core.CurrentStride >= cost)
-            {
-                _attributes.Core.CurrentStride -= cost;
-            }
+            if (_attributes.Core.CurrentStride >= cost) _attributes.Core.CurrentStride -= cost;
             else
             {
                 int apNeeded = cost - _attributes.Core.CurrentStride;
@@ -144,26 +144,17 @@ namespace Game.Units
             }
         }
 
-        // 纯动画协程 (不处理逻辑)
         IEnumerator CoMoveLerpOnly(HexCoords from, HexCoords dst, float dur)
         {
             Vector3 a; TryGetTileTopWorld(from, out a);
             Vector3 b; TryGetTileTopWorld(dst, out b);
-
             Vector3 dir = b - a;
             if (dir.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
-
             float t = 0f;
-            while (t < 1f)
-            {
-                t += Time.deltaTime / Mathf.Max(0.0001f, dur);
-                transform.position = Vector3.Lerp(a, b, Mathf.SmoothStep(0f, 1f, t));
-                yield return null;
-            }
+            while (t < 1f) { t += Time.deltaTime / Mathf.Max(0.0001f, dur); transform.position = Vector3.Lerp(a, b, Mathf.SmoothStep(0f, 1f, t)); yield return null; }
             transform.position = b;
         }
 
-        // 旧的单步方法 (保留兼容性)
         public bool TryStepTo(HexCoords dst, Action onDone = null)
         {
             if (!CanStepTo(dst)) return false;
@@ -187,11 +178,8 @@ namespace Game.Units
         {
             if (_grid == null) return false;
             if (_mCoords.DistanceTo(dst) != 1) return false;
-
-            // 检查资源是否足够 (Stride + AP)
             int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
             int totalRes = _attributes ? (_attributes.Core.CurrentStride + _attributes.Core.CurrentAP) : 0;
-
             return totalRes >= cost;
         }
 
@@ -199,11 +187,7 @@ namespace Game.Units
         {
             _tileCache.Clear();
             if (_grid == null) return;
-            foreach (var tile in _grid.EnumerateTiles())
-            {
-                if (tile != null && !_tileCache.ContainsKey(tile.Coords))
-                    _tileCache[tile.Coords] = tile.transform;
-            }
+            foreach (var tile in _grid.EnumerateTiles()) { if (tile != null && !_tileCache.ContainsKey(tile.Coords)) _tileCache[tile.Coords] = tile.transform; }
             _cachedGridVersion = _grid.Version;
         }
 

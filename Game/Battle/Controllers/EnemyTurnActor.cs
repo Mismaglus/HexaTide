@@ -1,159 +1,116 @@
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using Core.Hex;
 using Game.Units;
 using Game.Battle.Actions;
-using Game.Battle.Abilities;
-using Game.Grid; // 引用 Pathfinder
+using Game.Battle.Abilities; // 引用 TargetingResolver
+using Game.Battle.AI;        // 引用 EnemyBrain
+using Game.Grid;             // 引用 HexPathfinder
 
 namespace Game.Battle
 {
+    [RequireComponent(typeof(EnemyBrain))]
     public class EnemyTurnActor : MonoBehaviour, ITurnActor
     {
         [Header("Systems")]
         public ActionQueue queue;
         public AbilityRunner runner;
-        public BattleRules rules; // ⭐ 新增：需要规则来判断地形
+        public BattleRules rules;
 
-        [Header("Unit Data")]
-        public BattleUnit battleUnit;
-        public Ability basicAttack;
+        [Header("Visuals")]
+        public GridOutlineManager outlineManager; // 用于在攻击前展示意图
+
+        private EnemyBrain _brain;
+        private UnitMover _mover;
+        private BattleUnit _unit;
 
         void Awake()
         {
-            // 自动查找引用
-            if (queue == null) queue = FindFirstObjectByType<ActionQueue>(FindObjectsInactive.Exclude);
-            if (runner == null) runner = FindFirstObjectByType<AbilityRunner>(FindObjectsInactive.Exclude);
-            if (rules == null) rules = FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
+            _brain = GetComponent<EnemyBrain>();
+            _mover = GetComponent<UnitMover>();
+            _unit = GetComponent<BattleUnit>();
 
-            if (battleUnit == null && !TryGetComponent(out battleUnit))
-            {
-                Debug.LogWarning($"EnemyTurnActor on {name} missing BattleUnit.", this);
-            }
+            // 自动查找依赖
+            if (queue == null) queue = FindFirstObjectByType<ActionQueue>();
+            if (runner == null) runner = FindFirstObjectByType<AbilityRunner>();
+            if (rules == null) rules = FindFirstObjectByType<BattleRules>();
+            if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
         }
 
         public void OnTurnStart()
         {
-            battleUnit?.ResetTurnResources();
+            _unit?.ResetTurnResources();
         }
 
         public bool HasPendingAction => false;
 
         public IEnumerator TakeTurn()
         {
-            if (battleUnit == null || basicAttack == null) yield break;
+            if (_brain == null) yield break;
 
-            var unitMover = battleUnit.GetComponent<UnitMover>();
-            if (unitMover == null) yield break;
+            // 1. 思考最佳方案
+            AIPlan plan = _brain.Think();
 
-            // 1. 寻找最近的玩家单位 (Naive Target Selection)
-            var enemies = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
-                .Where(u => u.isPlayer) // 找玩家
-                .ToList();
-
-            if (enemies.Count == 0) yield break;
-
-            // 按距离排序，找最近的
-            var target = enemies
-                .OrderBy(u => unitMover._mCoords.DistanceTo(u.UnitRef.Coords))
-                .First();
-
-            var targetCoords = target.UnitRef.Coords;
-
-            // 2. 判断是否需要移动
-            // 如果已经在攻击范围内 (默认为1格)，直接打
-            if (unitMover._mCoords.DistanceTo(targetCoords) > basicAttack.maxRange)
+            if (plan.isValid)
             {
-                // 需要移动：找到目标身边最近的一个“可站立”空位
-                HexCoords? bestDest = GetBestAttackPosition(unitMover._mCoords, targetCoords);
+                Debug.Log($"[EnemyAI] {name} 决定: 移动到 {plan.moveDest}, 对 {plan.target.name} 使用 {plan.ability.name}");
 
-                if (bestDest.HasValue)
+                // 2. 展示意图 (Show Off)
+                // 让玩家看到这一回合敌人想干嘛：画箭头和红圈
+                if (outlineManager)
                 {
-                    // 计算路径
-                    var path = HexPathfinder.FindPath(unitMover._mCoords, bestDest.Value, rules, battleUnit.UnitRef);
+                    // 获取 AOE 范围
+                    var aoe = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability);
 
+                    Vector3 startPos = transform.position;
+                    // 需要获取目标格子的世界坐标，这里简单从 Unit 上取，或者通过 Grid 计算
+                    // 假设 Grid 就在场景里
+                    var gridComp = FindFirstObjectByType<BattleHexGrid>();
+                    Vector3 endPos = gridComp.GetTileWorldPosition(plan.targetCell);
+
+                    // 只有当真的要打的时候才画箭头
+                    bool showArrow = !plan.targetCell.Equals(_unit.UnitRef.Coords);
+
+                    outlineManager.ShowIntent(startPos, endPos, aoe, showArrow);
+                }
+
+                // 3. 停顿 1 秒让玩家看清楚
+                yield return new WaitForSeconds(1.0f);
+
+                // 4. 清除意图显示，开始行动
+                if (outlineManager) outlineManager.ClearIntent();
+
+                // 5. 执行移动 (如果需要)
+                if (!plan.moveDest.Equals(_unit.UnitRef.Coords))
+                {
+                    var path = HexPathfinder.FindPath(_unit.UnitRef.Coords, plan.moveDest, rules, _unit.UnitRef);
                     if (path != null && path.Count > 0)
                     {
-                        // ⭐ 关键：使用 PathMoveAction 平滑移动
-                        queue.Enqueue(new PathMoveAction(unitMover, path));
+                        queue.Enqueue(new PathMoveAction(_mover, path));
                     }
                 }
-            }
 
-            // 3. 尝试攻击 (无论是否移动过，都尝试打一下)
-            // 注意：这里不直接判断距离，而是让 AbilityAction 内部去校验
-            // 或者是我们预判一下，防止空挥
-            // 为了简单，这里我们假设 ActionQueue 执行完移动后，我们会再次检查距离
-            // 但 ActionQueue 是队列执行的，所以我们需要把攻击指令也塞进去，
-            // 如果移动后够不着，AbilityAction 内部的 IsValidTarget 会拦截并取消
-
-            var ctx = new AbilityContext
-            {
-                Caster = battleUnit,
-                Origin = unitMover._mCoords // 注意：这里其实有瑕疵，因为移动后坐标变了，但AbilityAction是在执行时重新获取位置的，所以没问题
-            };
-            ctx.TargetUnits.Add(target);
-
-            // 只有当预估距离足够时才入队，或者让 Action 自己判断
-            queue.Enqueue(new AbilityAction(basicAttack, ctx, runner));
-
-            // 4. 执行所有指令
-            yield return queue.RunAll();
-        }
-
-        // 寻找目标周围最近的可行走格子
-        private HexCoords? GetBestAttackPosition(HexCoords myPos, HexCoords targetPos)
-        {
-            HexCoords? best = null;
-            int minDist = int.MaxValue;
-
-            // 遍历目标周围一圈
-            foreach (var neighbor in targetPos.Neighbors())
-            {
-                // 如果这个格子不可走 (障碍物或被占)，且不是我自己站的位置，就跳过
-                if (!rules.IsTileWalkable(neighbor) && !neighbor.Equals(myPos)) continue;
-
-                int dist = myPos.DistanceTo(neighbor);
-                if (dist < minDist)
+                // 6. 执行技能
+                var ctx = new AbilityContext
                 {
-                    minDist = dist;
-                    best = neighbor;
-                }
+                    Caster = _unit,
+                    Origin = plan.moveDest // 关键：技能原点应该是移动后的位置
+                };
+
+                // 根据技能类型填入 Target
+                if (plan.target != null) ctx.TargetUnits.Add(plan.target);
+                ctx.TargetTiles.Add(plan.targetCell);
+
+                queue.Enqueue(new AbilityAction(plan.ability, ctx, runner));
+
+                // 7. 跑！
+                yield return queue.RunAll();
             }
-            return best;
-        }
-    }
-
-    /// <summary>
-    /// 一个简单的 Action，用于执行多步路径移动
-    /// </summary>
-    public class PathMoveAction : IAction
-    {
-        private readonly UnitMover _mover;
-        private readonly List<HexCoords> _path;
-
-        public PathMoveAction(UnitMover mover, List<HexCoords> path)
-        {
-            _mover = mover;
-            _path = path;
-        }
-
-        public bool IsValid =>
-            _mover != null &&
-            !_mover.IsMoving &&
-            _path != null &&
-            _path.Count > 0;
-
-        public IEnumerator Execute()
-        {
-            bool finished = false;
-            // 调用 UnitMover 的 FollowPath
-            _mover.FollowPath(_path, () => finished = true);
-
-            while (!finished)
-                yield return null;
+            else
+            {
+                Debug.Log($"[EnemyAI] {name} 发呆 (没有好的行动方案)");
+                yield return new WaitForSeconds(0.5f);
+            }
         }
     }
 }

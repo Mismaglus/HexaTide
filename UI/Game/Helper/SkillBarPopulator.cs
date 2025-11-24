@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
+
+// 假设你的 Ability 类型在这个命名空间
 using Game.Battle.Abilities;
 
 public class SkillBarPopulator : MonoBehaviour
@@ -17,12 +19,12 @@ public class SkillBarPopulator : MonoBehaviour
     public Vector2 shadowOffset = new Vector2(3f, -3f);
 
     [Header("敌方/锁定样式 (Enemy Style)")]
-    // ⭐ 修改：使用淡红色而不是暗色，保证可见度
+    // 🔴 淡红色，保证清晰度
     public Color enemyIconTint = new Color(1f, 0.85f, 0.85f, 1f);
     public Color enemyOutlineCol = new Color(0.6f, 0.2f, 0.2f, 1f);
     public Color enemyShadowCol = new Color(0.2f, 0.05f, 0.05f, 0.6f);
     public Color enemyGlowCol = new Color(0.8f, 0.0f, 0.0f, 0f);
-    public float enemyGlowAlpha = 0.0f; // 默认不发光，减少视觉干扰
+    public float enemyGlowAlpha = 0.0f;
 
     [Header("Icon 颜色（友军类型）")]
     // Physical / AP
@@ -65,7 +67,7 @@ public class SkillBarPopulator : MonoBehaviour
     struct SlotState { public bool hover; public bool selected; }
     private readonly Dictionary<int, SlotState> _slotStates = new Dictionary<int, SlotState>();
 
-    // 锁定状态 (是否选中了敌人)
+    // 锁定状态
     private bool _isLocked = false;
 
     public void SetLockedState(bool locked)
@@ -95,9 +97,7 @@ public class SkillBarPopulator : MonoBehaviour
 
     public void SetHover(int index, bool on)
     {
-        // 如果是敌人，不响应 Hover 变色，避免玩家误以为可点
-        if (_isLocked) return;
-
+        if (_isLocked) return; // 锁定时不响应 Hover
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
         st.hover = on; _slotStates[index] = st;
         UpdateGlowForSlot(index);
@@ -106,7 +106,6 @@ public class SkillBarPopulator : MonoBehaviour
     public void SetSelected(int index, bool on)
     {
         if (_isLocked) return;
-
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
         st.selected = on; _slotStates[index] = st;
         UpdateGlowForSlot(index);
@@ -134,22 +133,20 @@ public class SkillBarPopulator : MonoBehaviour
         if (glowMaterial != null) glowImg.material = glowMaterial;
         glowImg.rectTransform.localScale = Vector3.one * glowScale;
 
-        // === ⭐ 新增逻辑：控制 Hotkey 显隐 ===
-        // 只有在有技能 且 不是锁定状态(敌人) 时，才显示热键(1,2,3...)
+        // === ⭐ 1. Hotkey 显隐控制 ===
         Transform hotkeyRoot = FindHotkeyRoot(index);
         if (hotkeyRoot != null)
         {
             bool showHotkey = (ability != null) && !_isLocked;
             hotkeyRoot.gameObject.SetActive(showHotkey);
         }
-        // =================================
 
-        // 1. 准备颜色变量
+        // 2. 准备颜色变量
         string typeName = GetAbilityTypeName(ability);
         Color tint, outCol, shaCol, glowCol;
         float baseAlpha;
 
-        // 2. 核心分支：敌方 vs 友军
+        // 3. 核心分支：敌方 vs 友军
         if (_isLocked)
         {
             // === 敌方样式 ===
@@ -159,7 +156,6 @@ public class SkillBarPopulator : MonoBehaviour
             glowCol = enemyGlowCol;
             baseAlpha = enemyGlowAlpha;
 
-            // 强制显示 Enemy Gem
             ToggleGems(iconRoot.parent, "Enemy");
         }
         else
@@ -169,7 +165,7 @@ public class SkillBarPopulator : MonoBehaviour
             ToggleGems(iconRoot.parent, ability != null ? typeName : null);
         }
 
-        // 3. 应用到组件
+        // 4. 应用到组件
         var outline = iconImg.GetComponent<Outline>();
         if (outline == null) outline = iconImg.gameObject.AddComponent<Outline>();
 
@@ -182,7 +178,7 @@ public class SkillBarPopulator : MonoBehaviour
             iconImg.sprite = ability.icon;
             iconImg.type = Image.Type.Simple;
             iconImg.preserveAspect = true;
-            iconImg.color = tint; // 这里的 tint 现在是淡红色，而不是灰色
+            iconImg.color = tint;
 
             outline.enabled = true;
             outline.effectColor = outCol;
@@ -209,36 +205,48 @@ public class SkillBarPopulator : MonoBehaviour
         if (!_slotStates.ContainsKey(index)) _slotStates[index] = new SlotState();
         UpdateGlowForSlot(index);
 
-        // 4. 按钮点击逻辑
+        // 5. 处理 Button 组件交互性
         Transform slotTransform = hotBarRoot.Find($"Item_{index:00}");
         if (slotTransform != null)
         {
             Button btn = slotTransform.GetComponent<Button>();
             if (btn == null) btn = slotTransform.gameObject.AddComponent<Button>();
 
-            // ⭐ 关键修改：始终保持 interactable = true，防止图标变黑
-            btn.interactable = true;
+            // ⭐ A. 决定是否可交互
+            // 没有技能：禁用；有技能且敌方：允许交互以触发 hover/动画，但不响应点击
+            bool canInteract = (ability != null);
+            btn.interactable = canInteract;
 
-            // 如果想彻底禁用 Unity 的默认 Disabled 变色效果，可以修改 Transition
-            if (btn.transition == Selectable.Transition.ColorTint)
-            {
-                var cols = btn.colors;
-                // 将 disabledColor 设为白色或透明，避免 Unity 自动叠加灰色
-                cols.disabledColor = Color.white;
-                btn.colors = cols;
-            }
+            // ⭐ B. 强制修改禁用颜色为纯白，防止 Unity 自动变暗
+            var colors = btn.colors;
+            colors.disabledColor = Color.white; // 关键：禁用时保持原色
+            colors.colorMultiplier = 1f;
+            btn.colors = colors;
 
-            // 清除旧事件，绑定新事件
+            // ⭐ C. 动态调整按下动画：敌方 pressed=highlighted，友方 pressed=selected
+            ApplyAnimationTriggers(btn, _isLocked);
+
+            // C. 绑定事件
             btn.onClick.RemoveAllListeners();
-            if (ability != null)
+            if (canInteract && !_isLocked)
             {
                 btn.onClick.AddListener(() =>
                 {
-                    // ⭐ 逻辑拦截：只有非锁定时才响应点击
-                    if (!_isLocked) OnSkillClicked?.Invoke(index);
+                    OnSkillClicked?.Invoke(index);
                 });
             }
         }
+    }
+
+    void ApplyAnimationTriggers(Button btn, bool isLocked)
+    {
+        // 确保使用 Animation 过渡模式，这样 triggers 才生效
+        btn.transition = Selectable.Transition.Animation;
+
+        var triggers = btn.animationTriggers;
+        // 保持其他 trigger 不变，仅调整 pressed
+        triggers.pressedTrigger = isLocked ? triggers.highlightedTrigger : triggers.selectedTrigger;
+        btn.animationTriggers = triggers;
     }
 
     void UpdateGlowForSlot(int index)
@@ -353,7 +361,7 @@ public class SkillBarPopulator : MonoBehaviour
         return inner.Find("Icon");
     }
 
-    // ⭐ 新增：查找 Hotkey 节点
+    // 查找 Hotkey 节点: HotBar/Item_xx/Item/Input_Hotkey
     Transform FindHotkeyRoot(int index)
     {
         string itemName = $"Item_{index:00}";

@@ -60,12 +60,57 @@ namespace Game.Battle.Abilities.Effects
             yield break;
         }
 
-        public override string GetDescription()
+        public override string GetDescription(BattleUnit caster)
         {
-            string desc = $"Deals {config.basePhysical} Phys";
-            if (config.baseMagical > 0) desc += $" + {config.baseMagical} Mag";
-            desc += " damage.";
-            return desc;
+            // 1. 基础描述
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+            // 2. 物理部分
+            if (config.basePhysical > 0 || HasScaling(config.physScaling))
+            {
+                int bonus = 0;
+                if (caster != null)
+                {
+                    bonus = Mathf.RoundToInt(config.physScaling.Evaluate(caster.Attributes.Core));
+                }
+
+                sb.Append($"造成 <color=#FF4444>{config.basePhysical}</color>");
+                if (bonus > 0) sb.Append($" + <color=#FFAAAA>{bonus}</color>");
+                sb.Append(" 物理伤害");
+
+                // 显示详细加成公式
+                AppendScalingDetails(config.physScaling, sb);
+            }
+
+            // 3. 魔法部分 (类似逻辑)
+            if (config.baseMagical > 0 || HasScaling(config.magScaling))
+            {
+                if (sb.Length > 0) sb.Append(" 以及 ");
+
+                int bonus = 0;
+                if (caster != null) bonus = Mathf.RoundToInt(config.magScaling.Evaluate(caster.Attributes.Core));
+
+                sb.Append($"<color=#4444FF>{config.baseMagical}</color>");
+                if (bonus > 0) sb.Append($" + <color=#AAAAFF>{bonus}</color>");
+                sb.Append(" 魔法伤害");
+
+                AppendScalingDetails(config.magScaling, sb);
+            }
+
+            return sb.ToString();
+        }
+
+        bool HasScaling(Combat.ScalingMatrix m)
+        {
+            return m.Str > 0 || m.Dex > 0 || m.Int > 0 || m.Faith > 0;
+        }
+
+        void AppendScalingDetails(Combat.ScalingMatrix m, System.Text.StringBuilder sb)
+        {
+            if (m.Str > 0) sb.Append($" (+{m.Str:P0} 力量)");
+            if (m.Dex > 0) sb.Append($" (+{m.Dex:P0} 敏捷)");
+            if (m.Int > 0) sb.Append($" (+{m.Int:P0} 智力)");
+            if (m.Faith > 0) sb.Append($" (+{m.Faith:P0} 信仰)");
         }
     }
 }

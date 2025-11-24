@@ -81,5 +81,26 @@ namespace Game.Battle.Abilities
 
             yield return runner.PerformEffects(caster, this, ctx, effects);
         }
+
+        [Header("Fluff")]
+        [TextArea] public string flavorText = "这是关于技能的背景故事...";
+
+        public string GetDynamicDescription(BattleUnit caster)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+            // 遍历所有效果获取描述
+            foreach (var effect in effects)
+            {
+                // 这里需要修改 AbilityEffect 基类，把 GetDescription 签名改成接受 (BattleUnit)
+                // 并在基类提供一个默认实现
+                if (effect != null)
+                {
+                    sb.AppendLine(effect.GetDescription(caster)); // 需同步修改基类签名
+                }
+            }
+
+            return sb.ToString();
+        }
     }
 }

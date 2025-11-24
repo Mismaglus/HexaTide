@@ -8,7 +8,7 @@ namespace Game.Battle.Abilities
         public abstract IEnumerator Apply(BattleUnit caster, Ability ability, AbilityContext ctx);
 
         // ⭐ 新增：提供默认描述方法，供子类重写
-        public virtual string GetDescription()
+        public virtual string GetDescription(BattleUnit caster)
         {
             return name;
         }

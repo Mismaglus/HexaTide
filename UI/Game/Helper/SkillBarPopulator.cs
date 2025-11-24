@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
-
-// 假设你的 Ability 类型在这个命名空间
 using Game.Battle.Abilities;
+// 如果你有 BattleUnit 的引用需求，请确保引用命名空间
+// using Game.Battle; 
 
 public class SkillBarPopulator : MonoBehaviour
 {
@@ -13,6 +13,13 @@ public class SkillBarPopulator : MonoBehaviour
 
     [Header("Scene Refs")]
     public Transform hotBarRoot;
+
+    [Header("Tracery Sprites (纹饰图标)")]
+    // ⭐ 新增：用于接收你提供的三种Sprite
+    public Sprite traceryPhysical;
+    public Sprite traceryMagic;
+    public Sprite traceryMixed;
+    public Sprite traceryEnemy; // 额外添加一个敌方槽位，如果不需要可以留空
 
     [Header("描边/阴影偏移")]
     public Vector2 outlineOffset = new Vector2(-1f, 1f);
@@ -70,6 +77,9 @@ public class SkillBarPopulator : MonoBehaviour
     // 锁定状态
     private bool _isLocked = false;
 
+    // (可选) 如果之前增加了 currentOwner 字段用于 Tooltip，保留它
+    // [HideInInspector] public Game.Battle.BattleUnit currentOwner; 
+
     public void SetLockedState(bool locked)
     {
         if (_isLocked != locked)
@@ -101,6 +111,13 @@ public class SkillBarPopulator : MonoBehaviour
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
         st.hover = on; _slotStates[index] = st;
         UpdateGlowForSlot(index);
+
+        // (可选) Tooltip 触发逻辑放在这里
+        /* if (on && index >= 0 && index < abilities.Count && abilities[index] != null)
+             Game.UI.TooltipSystem.Show(abilities[index], currentOwner);
+        else
+             Game.UI.TooltipSystem.Hide();
+        */
     }
 
     public void SetSelected(int index, bool on)
@@ -165,7 +182,10 @@ public class SkillBarPopulator : MonoBehaviour
             ToggleGems(iconRoot.parent, ability != null ? typeName : null);
         }
 
-        // 4. 应用到组件
+        // ⭐ 4. 更新 Tracery (新功能)
+        UpdateTracery(index, ability, typeName);
+
+        // 5. 应用到组件
         var outline = iconImg.GetComponent<Outline>();
         if (outline == null) outline = iconImg.gameObject.AddComponent<Outline>();
 
@@ -205,7 +225,7 @@ public class SkillBarPopulator : MonoBehaviour
         if (!_slotStates.ContainsKey(index)) _slotStates[index] = new SlotState();
         UpdateGlowForSlot(index);
 
-        // 5. 处理 Button 组件交互性
+        // 6. 处理 Button 组件交互性
         Transform slotTransform = hotBarRoot.Find($"Item_{index:00}");
         if (slotTransform != null)
         {
@@ -213,20 +233,19 @@ public class SkillBarPopulator : MonoBehaviour
             if (btn == null) btn = slotTransform.gameObject.AddComponent<Button>();
 
             // ⭐ A. 决定是否可交互
-            // 没有技能：禁用；有技能且敌方：允许交互以触发 hover/动画，但不响应点击
             bool canInteract = (ability != null);
             btn.interactable = canInteract;
 
-            // ⭐ B. 强制修改禁用颜色为纯白，防止 Unity 自动变暗
+            // ⭐ B. 强制修改禁用颜色为纯白
             var colors = btn.colors;
-            colors.disabledColor = Color.white; // 关键：禁用时保持原色
+            colors.disabledColor = Color.white;
             colors.colorMultiplier = 1f;
             btn.colors = colors;
 
-            // ⭐ C. 动态调整按下动画：敌方 pressed=highlighted，友方 pressed=selected
+            // ⭐ C. 动态调整按下动画
             ApplyAnimationTriggers(btn, _isLocked);
 
-            // C. 绑定事件
+            // D. 绑定事件
             btn.onClick.RemoveAllListeners();
             if (canInteract && !_isLocked)
             {
@@ -238,22 +257,64 @@ public class SkillBarPopulator : MonoBehaviour
         }
     }
 
-    void ApplyAnimationTriggers(Button btn, bool isLocked)
+    // === ⭐ 新增 Tracery 逻辑 ===
+    void UpdateTracery(int index, Ability ability, string typeName)
     {
-        // 确保使用 Animation 过渡模式，这样 triggers 才生效
-        btn.transition = Selectable.Transition.Animation;
+        // 找到节点
+        Transform traceryRoot = FindTraceryRoot(index);
+        if (traceryRoot == null) return;
 
-        var triggers = btn.animationTriggers;
-        // 敌方：pressed/selected 都用 highlight；友方：pressed=selected
-        if (isLocked)
+        Image traceryImg = traceryRoot.GetComponent<Image>();
+        if (traceryImg == null) return;
+
+        // 如果没有技能，隐藏纹饰
+        if (ability == null)
         {
-            triggers.pressedTrigger = triggers.highlightedTrigger;
-            triggers.selectedTrigger = triggers.highlightedTrigger;
+            traceryImg.enabled = false;
+            return;
+        }
+
+        traceryImg.enabled = true;
+        Sprite targetSprite = traceryMixed; // 默认用混合
+
+        if (_isLocked)
+        {
+            // 如果是敌人，使用 Enemy sprite (如果未赋值则fallback到 Mixed)
+            if (traceryEnemy != null) targetSprite = traceryEnemy;
         }
         else
         {
-            triggers.pressedTrigger = triggers.selectedTrigger;
+            // 根据类型选择 Sprite
+            if (!string.IsNullOrEmpty(typeName))
+            {
+                switch (typeName.ToLower())
+                {
+                    case "physical":
+                        targetSprite = traceryPhysical;
+                        break;
+                    case "magic":
+                    case "magical":
+                        targetSprite = traceryMagic;
+                        break;
+                    default:
+                        targetSprite = traceryMixed;
+                        break;
+                }
+            }
         }
+
+        // 仅替换 Sprite，不修改 Color/Material
+        if (targetSprite != null)
+        {
+            traceryImg.sprite = targetSprite;
+        }
+    }
+
+    void ApplyAnimationTriggers(Button btn, bool isLocked)
+    {
+        btn.transition = Selectable.Transition.Animation;
+        var triggers = btn.animationTriggers;
+        triggers.pressedTrigger = isLocked ? triggers.highlightedTrigger : triggers.selectedTrigger;
         btn.animationTriggers = triggers;
     }
 
@@ -378,6 +439,17 @@ public class SkillBarPopulator : MonoBehaviour
         var inner = item.Find("Item");
         if (inner == null) return null;
         return inner.Find("Input_Hotkey");
+    }
+
+    // ⭐ 新增：查找 Tracery 节点: HotBar/Item_xx/Item/SPR_Tracery
+    Transform FindTraceryRoot(int index)
+    {
+        string itemName = $"Item_{index:00}";
+        var item = hotBarRoot != null ? hotBarRoot.Find(itemName) : null;
+        if (item == null) return null;
+        var inner = item.Find("Item");
+        if (inner == null) return null;
+        return inner.Find("SPR_Tracery");
     }
 
     Image GetOrCreateChildImage(Transform parent, string childName)

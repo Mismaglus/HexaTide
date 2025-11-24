@@ -244,8 +244,16 @@ public class SkillBarPopulator : MonoBehaviour
         btn.transition = Selectable.Transition.Animation;
 
         var triggers = btn.animationTriggers;
-        // 保持其他 trigger 不变，仅调整 pressed
-        triggers.pressedTrigger = isLocked ? triggers.highlightedTrigger : triggers.selectedTrigger;
+        // 敌方：pressed/selected 都用 highlight；友方：pressed=selected
+        if (isLocked)
+        {
+            triggers.pressedTrigger = triggers.highlightedTrigger;
+            triggers.selectedTrigger = triggers.highlightedTrigger;
+        }
+        else
+        {
+            triggers.pressedTrigger = triggers.selectedTrigger;
+        }
         btn.animationTriggers = triggers;
     }
 

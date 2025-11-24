@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
 using Game.Grid;
-using Game.Battle; // 引用 BattleUnit
+using Game.Battle; // 引用 BattleUnit 和 BattleIntentSystem
 
 namespace Game.Units
 {
@@ -106,18 +106,21 @@ namespace Game.Units
                 int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(nextStep)) : 1;
                 ConsumeResources(cost);
 
+                // ⭐⭐⭐ 关键修复：先缓存当前的坐标
+                HexCoords currentPos = _mCoords;
+
                 yield return StartCoroutine(CoMoveLerpOnly(_mCoords, nextStep, secondsPerTile));
 
                 if (_unit) _unit.WarpTo(nextStep);
                 else _mCoords = nextStep;
 
-                OnMoveFinished?.Invoke(nextStep, nextStep);
+                // ⭐⭐⭐ 关键修复：使用缓存的上一格坐标 currentPos 作为 from
+                OnMoveFinished?.Invoke(currentPos, nextStep);
             }
 
             IsMoving = false;
             OnPathCompleted?.Invoke();
 
-            // 通知预警系统
             if (BattleIntentSystem.Instance != null)
                 BattleIntentSystem.Instance.UpdateIntents();
 
@@ -139,7 +142,6 @@ namespace Game.Units
                 _attributes.Core.CurrentAP = Mathf.Max(0, _attributes.Core.CurrentAP - apNeeded);
             }
 
-            // ⭐ 关键：通知 BattleUnit 资源变了，这会触发 SelectionManager 重绘范围
             if (_unit != null)
             {
                 var bu = _unit.GetComponent<BattleUnit>();

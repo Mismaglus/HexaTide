@@ -39,13 +39,11 @@ namespace Game.Battle
         {
             if (side == TurnSide.Player)
             {
-                // 玩家回合：计算并显示
                 RefreshEnemyList();
                 UpdateIntents();
             }
             else
             {
-                // 敌人回合：清除所有显示
                 if (outlineManager) outlineManager.SetEnemyIntent(null, null);
             }
         }
@@ -78,12 +76,17 @@ namespace Game.Battle
                 var plan = enemy.Think();
                 if (plan.isValid)
                 {
-                    // 1. 收集红圈
-                    var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability);
-                    _dangerZone.UnionWith(area);
+                    // ⭐ 修复点 1: 只有当 plan 有技能时，才计算 AOE 危险区
+                    // 如果是 Chase (追击) 模式，ability 为 null，就不画红圈
+                    if (plan.ability != null)
+                    {
+                        var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability);
+                        _dangerZone.UnionWith(area);
+                    }
 
                     // 2. 收集箭头
-                    // 如果目标不是自己（Self Buff），则画箭头
+                    // 无论是攻击还是移动，只要目标点不是自己，就画箭头
+                    // 注意：如果是 Chase 模式，targetCell 是它想去的格子；如果是攻击，是攻击目标格
                     if (!plan.targetCell.Equals(enemy.GetComponent<Unit>().Coords))
                     {
                         Vector3 start = enemy.transform.position;
@@ -93,7 +96,6 @@ namespace Game.Battle
                 }
             }
 
-            // 提交给 Manager
             outlineManager.SetEnemyIntent(_dangerZone, _arrowList);
         }
     }

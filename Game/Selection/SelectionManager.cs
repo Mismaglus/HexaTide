@@ -47,10 +47,13 @@ namespace Game.Battle
         public RangeMode debugRangeMode = RangeMode.None;
         public int debugRadius = 2;
 
+        // Cache
         HexCoords? _selected;
         HexCoords? _hoverCache;
+
         HashSet<HexCoords> _currentFreeSet = new HashSet<HexCoords>();
         HashSet<HexCoords> _currentCostSet = new HashSet<HexCoords>();
+
         readonly Dictionary<HexCoords, Unit> _units = new();
 
         [Header("Data Source")]
@@ -102,6 +105,7 @@ namespace Game.Battle
             if (_battleSM == null) _battleSM = FindFirstObjectByType<BattleStateMachine>();
             if (targetingSystem == null) targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>();
             if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
+
             if (gridCursor == null) gridCursor = FindFirstObjectByType<BattleCursor>();
             if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
 
@@ -163,15 +167,10 @@ namespace Game.Battle
             }
         }
 
-        // 资源变化时的回调
+        // 资源变化回调
         void HandleUnitResourcesChanged()
         {
-            // 如果资源变了，且当前选中单位没有在移动，就重绘
-            // (如果在移动中，RecalcRange 内部会拦截并隐藏)
-            if (SelectedUnit != null)
-            {
-                RecalcRange();
-            }
+            if (SelectedUnit != null) RecalcRange();
         }
 
         public bool HasUnitAt(HexCoords c)
@@ -206,12 +205,11 @@ namespace Game.Battle
             if (!unit.TryGetComponent<UnitMover>(out var mover)) return;
             if (mover.IsMoving) return;
             if (battleRules == null) return;
-
             var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit);
             if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
             if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords)) { Debug.Log("目标太远"); return; }
 
-            // ⭐ 开始移动时，立刻清除范围显示
+            // 移动开始，清除范围显示
             if (outlineManager) outlineManager.ClearMovementRange();
 
             mover.FollowPath(path, onComplete: () =>
@@ -220,7 +218,6 @@ namespace Game.Battle
                 _units[unit.Coords] = unit;
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
-                // 移动结束，重新显示(如果有AP)
                 RecalcRange();
             });
         }
@@ -241,17 +238,20 @@ namespace Game.Battle
             GetHighlighter(current)?.SetSelected(false);
             _selected = null;
             highlighter.SetSelected(null);
-            if (outlineManager) { outlineManager.ClearMovementRange(); outlineManager.SetState(OutlineState.None); }
-            if (gridCursor) gridCursor.Hide();
+
+            // 清理
+            ClearVisuals();
+            if (outlineManager) outlineManager.SetState(OutlineState.None);
+
             ApplyCursor(cursorDefault);
             SelectedUnit = null;
             if (_hoveredUnit != null && _hoveredUnit != SelectedUnit) GetHighlighter(_hoveredUnit)?.SetHover(true);
         }
 
+        // ⭐ 修复：移除了不存在的 drawer 引用，改为调用 Manager
         void ClearVisuals()
         {
-            if (moveFreeDrawer) moveFreeDrawer.Hide();
-            if (moveCostDrawer) moveCostDrawer.Hide();
+            if (outlineManager) outlineManager.ClearMovementRange();
             if (gridCursor) gridCursor.Hide();
         }
 
@@ -349,7 +349,7 @@ namespace Game.Battle
                 if (SelectedUnit.IsPlayerControlled && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
                 {
 
-                    // ⭐ 核心修复：如果在移动中，强制清空并退出
+                    // 如果在移动中，清空并不画
                     if (SelectedUnit.TryGetComponent<UnitMover>(out var mover) && mover.IsMoving)
                     {
                         if (outlineManager) outlineManager.ClearMovementRange();
@@ -357,6 +357,14 @@ namespace Game.Battle
                     }
 
                     HexCoords center = SelectedUnit.Coords; int stride = attrs.Core.CurrentStride; int ap = attrs.Core.CurrentAP;
+
+                    // 这里的逻辑可以根据需求微调：比如 AP=0 Stride=0 时不画
+                    if (stride == 0 && ap == 0)
+                    {
+                        if (outlineManager) outlineManager.ClearMovementRange();
+                        return;
+                    }
+
                     if (stride > 0) foreach (var c in center.Disk(stride)) _currentFreeSet.Add(c); else _currentFreeSet.Add(center);
                     int totalRange = stride + ap;
                     if (ap > 0) foreach (var c in center.Disk(totalRange)) if (!_currentFreeSet.Contains(c)) _currentCostSet.Add(c);

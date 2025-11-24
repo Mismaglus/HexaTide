@@ -27,7 +27,6 @@ namespace Game.Battle
         public BattleRules battleRules;
 
         [Header("Visuals Manager")]
-        // ⭐ 替换了原来的 RangeOutlineDrawer 引用
         public GridOutlineManager outlineManager;
         public BattleCursor gridCursor;
 
@@ -48,14 +47,15 @@ namespace Game.Battle
         public RangeMode debugRangeMode = RangeMode.None;
         public int debugRadius = 2;
 
-        // Cache
         HexCoords? _selected;
         HexCoords? _hoverCache;
-
         HashSet<HexCoords> _currentFreeSet = new HashSet<HexCoords>();
         HashSet<HexCoords> _currentCostSet = new HashSet<HexCoords>();
-
         readonly Dictionary<HexCoords, Unit> _units = new();
+
+        [Header("Data Source")]
+        [SerializeField] private GridOccupancy occupancy;
+
         Unit _selectedUnit;
 
         public Unit SelectedUnit
@@ -64,7 +64,21 @@ namespace Game.Battle
             private set
             {
                 if (_selectedUnit == value) return;
+
+                // 1. 取消订阅旧单位
+                if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var oldBu))
+                {
+                    oldBu.OnResourcesChanged -= HandleUnitResourcesChanged;
+                }
+
                 _selectedUnit = value;
+
+                // 2. 订阅新单位
+                if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var newBu))
+                {
+                    newBu.OnResourcesChanged += HandleUnitResourcesChanged;
+                }
+
                 OnSelectedUnitChanged?.Invoke(_selectedUnit);
                 RecalcRange();
             }
@@ -74,15 +88,13 @@ namespace Game.Battle
         Unit _hoveredUnit;
         readonly Dictionary<Unit, UnitHighlighter> _HighlighterCache = new();
 
-        [Header("Grid/Occupancy")]
-        [SerializeField] private Game.Grid.GridOccupancy occupancy;
-
         void Reset()
         {
             if (!input) input = FindFirstObjectByType<BattleHexInput>(FindObjectsInactive.Exclude);
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(FindObjectsInactive.Exclude);
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>(FindObjectsInactive.Exclude);
             if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>(FindObjectsInactive.Exclude);
+            if (!occupancy) occupancy = FindFirstObjectByType<GridOccupancy>(FindObjectsInactive.Exclude);
         }
 
         void Awake()
@@ -91,9 +103,17 @@ namespace Game.Battle
             if (targetingSystem == null) targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>();
             if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
             if (gridCursor == null) gridCursor = FindFirstObjectByType<BattleCursor>();
-
-            // 自动查找 OutlineManager
             if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
+
+            if (occupancy == null)
+            {
+                occupancy = FindFirstObjectByType<GridOccupancy>();
+                if (occupancy == null)
+                {
+                    var go = new GameObject("GridOccupancy_Auto");
+                    occupancy = go.AddComponent<GridOccupancy>();
+                }
+            }
         }
 
         void Start()
@@ -143,12 +163,24 @@ namespace Game.Battle
             }
         }
 
+        // 资源变化时的回调
+        void HandleUnitResourcesChanged()
+        {
+            // 如果资源变了，且当前选中单位没有在移动，就重绘
+            // (如果在移动中，RecalcRange 内部会拦截并隐藏)
+            if (SelectedUnit != null)
+            {
+                RecalcRange();
+            }
+        }
+
         public bool HasUnitAt(HexCoords c)
         {
             if (_units.ContainsKey(c)) return true;
             return occupancy != null && occupancy.HasUnitAt(c);
         }
         public bool IsEmpty(HexCoords c) => !HasUnitAt(c);
+
         public bool TryGetUnitAt(HexCoords c, out Unit u)
         {
             if (_units.TryGetValue(c, out u)) return true;
@@ -167,30 +199,20 @@ namespace Game.Battle
         {
             if (_battleSM != null && _battleSM.CurrentTurn != TurnSide.Player) return;
             if (SelectedUnit == null || _selected == null) return;
-
             var unit = SelectedUnit;
             if (!unit.IsPlayerControlled) return;
             if (unit.Coords.Equals(targetCoords)) return;
             if (HasUnitAt(targetCoords)) return;
-
             if (!unit.TryGetComponent<UnitMover>(out var mover)) return;
             if (mover.IsMoving) return;
-
             if (battleRules == null) return;
 
             var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit);
+            if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
+            if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords)) { Debug.Log("目标太远"); return; }
 
-            if (path == null || path.Count == 0)
-            {
-                Debug.Log("无法到达");
-                return;
-            }
-
-            if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords))
-            {
-                Debug.Log("目标太远，资源不足");
-                return;
-            }
+            // ⭐ 开始移动时，立刻清除范围显示
+            if (outlineManager) outlineManager.ClearMovementRange();
 
             mover.FollowPath(path, onComplete: () =>
             {
@@ -198,6 +220,7 @@ namespace Game.Battle
                 _units[unit.Coords] = unit;
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
+                // 移动结束，重新显示(如果有AP)
                 RecalcRange();
             });
         }
@@ -216,179 +239,137 @@ namespace Game.Battle
             var current = SelectedUnit;
             if (current == null) return;
             GetHighlighter(current)?.SetSelected(false);
-
             _selected = null;
             highlighter.SetSelected(null);
-
-            // ⭐ 只是通知 Manager 清除，并切回无状态
-            if (outlineManager)
-            {
-                outlineManager.ClearMovementRange();
-                outlineManager.SetState(OutlineState.None);
-            }
+            if (outlineManager) { outlineManager.ClearMovementRange(); outlineManager.SetState(OutlineState.None); }
             if (gridCursor) gridCursor.Hide();
-
             ApplyCursor(cursorDefault);
             SelectedUnit = null;
-
-            if (_hoveredUnit != null && _hoveredUnit != SelectedUnit)
-                GetHighlighter(_hoveredUnit)?.SetHover(true);
+            if (_hoveredUnit != null && _hoveredUnit != SelectedUnit) GetHighlighter(_hoveredUnit)?.SetHover(true);
         }
 
-        public void RegisterUnit(Unit u) { if (u == null) return; occupancy?.Register(u); RemoveUnitMapping(u); _units[u.Coords] = u; u.OnMoveFinished -= OnUnitMoveFinished; u.OnMoveFinished += OnUnitMoveFinished; _ = GetHighlighter(u); }
-        public void UnregisterUnit(Unit u) { if (u == null) return; occupancy?.Unregister(u); u.OnMoveFinished -= OnUnitMoveFinished; var vis = GetHighlighter(u); vis?.SetHover(false); vis?.SetSelected(false); if (_hoveredUnit == u) _hoveredUnit = null; RemoveUnitMapping(u); if (SelectedUnit == u) { _selected = null; highlighter.SetSelected(null); SelectedUnit = null; } }
-        public void SyncUnit(Unit u) { if (u == null) return; occupancy?.SyncUnit(u); RemoveUnitMapping(u); _units[u.Coords] = u; }
-        void RemoveUnitMapping(Unit u) { HexCoords keyToRemove = default; bool found = false; foreach (var kv in _units) { if (kv.Value == u) { keyToRemove = kv.Key; found = true; break; } } if (found) _units.Remove(keyToRemove); }
-        public bool IsOccupied(HexCoords c) => HasUnitAt(c);
+        void ClearVisuals()
+        {
+            if (moveFreeDrawer) moveFreeDrawer.Hide();
+            if (moveCostDrawer) moveCostDrawer.Hide();
+            if (gridCursor) gridCursor.Hide();
+        }
+
+        public void RegisterUnit(Unit u)
+        {
+            if (u == null) return;
+            if (occupancy != null) occupancy.Register(u);
+            RemoveUnitMapping(u);
+            _units[u.Coords] = u;
+            u.OnMoveFinished -= OnUnitMoveFinished;
+            u.OnMoveFinished += OnUnitMoveFinished;
+            _ = GetHighlighter(u);
+        }
+
+        public void UnregisterUnit(Unit u)
+        {
+            if (u == null) return;
+            if (occupancy != null) occupancy.Unregister(u);
+            u.OnMoveFinished -= OnUnitMoveFinished;
+            var vis = GetHighlighter(u);
+            vis?.SetHover(false);
+            vis?.SetSelected(false);
+            if (_hoveredUnit == u) _hoveredUnit = null;
+            RemoveUnitMapping(u);
+            if (SelectedUnit == u) { _selected = null; highlighter.SetSelected(null); SelectedUnit = null; }
+        }
+
+        public void SyncUnit(Unit u)
+        {
+            if (u == null) return;
+            if (occupancy != null) occupancy.SyncUnit(u);
+            RemoveUnitMapping(u);
+            _units[u.Coords] = u;
+        }
+
+        void RemoveUnitMapping(Unit u)
+        {
+            HexCoords keyToRemove = default;
+            bool found = false;
+            foreach (var kv in _units) { if (kv.Value == u) { keyToRemove = kv.Key; found = true; break; } }
+            if (found) _units.Remove(keyToRemove);
+        }
 
         void OnHoverChanged(HexCoords? h)
         {
-            // 如果 TargetingSystem 正在工作，它会接管状态，这里只负责更新 HoverCache
-            if (targetingSystem != null && targetingSystem.IsTargeting)
-            {
-                if (_hoverCache.HasValue)
-                {
-                    _hoverCache = null;
-                    highlighter.SetHover(null);
-                    if (gridCursor) gridCursor.Hide();
-                }
-                return;
-            }
-
+            if (targetingSystem != null && targetingSystem.IsTargeting) { if (_hoverCache.HasValue) { _hoverCache = null; highlighter.SetHover(null); if (gridCursor) gridCursor.Hide(); } return; }
             _hoverCache = h;
             Unit unitUnderMouse = null;
             if (h.HasValue) TryGetUnitAt(h.Value, out unitUnderMouse);
 
-            // === 光标逻辑 ===
-            if (unitUnderMouse != null)
-            {
-                if (gridCursor) gridCursor.Hide();
-                ApplyCursor(cursorHoverSelectable);
-            }
+            if (unitUnderMouse != null) { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorHoverSelectable); }
             else if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
-                HexCoords pos = h.Value;
-                bool isFree = _currentFreeSet.Contains(pos);
-                bool isCost = _currentCostSet.Contains(pos);
-                bool isValid = isFree || isCost;
-
+                HexCoords pos = h.Value; bool isFree = _currentFreeSet.Contains(pos); bool isCost = _currentCostSet.Contains(pos); bool isValid = isFree || isCost;
                 if (gridCursor) gridCursor.Show(pos, isValid);
-
-                if (isFree) ApplyCursor(cursorMoveFree);
-                else if (isCost) ApplyCursor(cursorMoveCost);
-                else ApplyCursor(cursorInvalid);
+                if (isFree) ApplyCursor(cursorMoveFree); else if (isCost) ApplyCursor(cursorMoveCost); else ApplyCursor(cursorInvalid);
             }
-            else
-            {
-                if (gridCursor) gridCursor.Hide();
-                ApplyCursor(cursorDefault);
-            }
+            else { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorDefault); }
 
-            // ... Highlighter ...
             Unit newHover = unitUnderMouse;
             if (ReferenceEquals(newHover, _hoveredUnit)) return;
-            if (_hoveredUnit != null)
-            {
-                var vOld = GetHighlighter(_hoveredUnit);
-                if (_hoveredUnit == SelectedUnit) { vOld?.SetHover(false); vOld?.SetSelected(true); }
-                else { vOld?.SetHover(false); }
-            }
-            if (newHover != null)
-            {
-                var vNew = GetHighlighter(newHover);
-                if (newHover == SelectedUnit) { vNew?.SetSelected(true); vNew?.SetHover(true); }
-                else { vNew?.SetHover(true); }
-            }
+            if (_hoveredUnit != null) { var vOld = GetHighlighter(_hoveredUnit); if (_hoveredUnit == SelectedUnit) { vOld?.SetHover(false); vOld?.SetSelected(true); } else { vOld?.SetHover(false); } }
+            if (newHover != null) { var vNew = GetHighlighter(newHover); if (newHover == SelectedUnit) { vNew?.SetSelected(true); vNew?.SetHover(true); } else { vNew?.SetHover(true); } }
             _hoveredUnit = newHover;
         }
 
         void OnTileClicked(HexCoords c)
         {
             if (targetingSystem != null && targetingSystem.IsTargeting) return;
-
             if (TryGetUnitAt(c, out var unit))
             {
                 if (SelectedUnit == unit) { Deselect(); return; }
                 if (SelectedUnit != null) GetHighlighter(SelectedUnit)?.SetSelected(false);
-
-                SelectedUnit = unit;
-                _selected = c;
-                highlighter.SetSelected(c);
-
-                var vNew = GetHighlighter(SelectedUnit);
-                if (_hoveredUnit == SelectedUnit) { vNew?.SetSelected(true); vNew?.SetHover(true); }
-                else vNew?.SetSelected(true);
-
+                SelectedUnit = unit; _selected = c; highlighter.SetSelected(c);
+                var vNew = GetHighlighter(SelectedUnit); if (_hoveredUnit == SelectedUnit) { vNew?.SetSelected(true); vNew?.SetHover(true); } else vNew?.SetSelected(true);
                 return;
             }
-
-            if (SelectedUnit != null && !SelectedUnit.IsMoving)
-            {
-                HandleClickOnEmptyTile(c);
-            }
+            if (SelectedUnit != null && !SelectedUnit.IsMoving) HandleClickOnEmptyTile(c);
         }
 
         void OnUnitMoveFinished(Unit u, HexCoords from, HexCoords to)
         {
-            RemoveUnitMapping(u);
-            _units[to] = u;
-            if (SelectedUnit == u)
-            {
-                _selected = to;
-                highlighter.SetSelected(to);
-                RecalcRange();
-            }
+            RemoveUnitMapping(u); _units[to] = u;
+            if (SelectedUnit == u) { _selected = to; highlighter.SetSelected(to); RecalcRange(); }
         }
 
         void RecalcRange()
         {
-            _currentFreeSet.Clear();
-            _currentCostSet.Clear();
+            _currentFreeSet.Clear(); _currentCostSet.Clear();
             if (gridCursor) gridCursor.Hide();
-
             if (targetingSystem != null && targetingSystem.IsTargeting) return;
 
             if (SelectedUnit != null)
             {
                 if (SelectedUnit.IsPlayerControlled && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
                 {
-                    HexCoords center = SelectedUnit.Coords;
-                    int stride = attrs.Core.CurrentStride;
-                    int ap = attrs.Core.CurrentAP;
 
-                    if (stride > 0) foreach (var c in center.Disk(stride)) _currentFreeSet.Add(c);
-                    else _currentFreeSet.Add(center);
+                    // ⭐ 核心修复：如果在移动中，强制清空并退出
+                    if (SelectedUnit.TryGetComponent<UnitMover>(out var mover) && mover.IsMoving)
+                    {
+                        if (outlineManager) outlineManager.ClearMovementRange();
+                        return;
+                    }
 
+                    HexCoords center = SelectedUnit.Coords; int stride = attrs.Core.CurrentStride; int ap = attrs.Core.CurrentAP;
+                    if (stride > 0) foreach (var c in center.Disk(stride)) _currentFreeSet.Add(c); else _currentFreeSet.Add(center);
                     int totalRange = stride + ap;
-                    if (ap > 0)
-                    {
-                        foreach (var c in center.Disk(totalRange))
-                        {
-                            if (!_currentFreeSet.Contains(c)) _currentCostSet.Add(c);
-                        }
-                    }
-
-                    // ⭐ 更新 Manager 数据并请求移动状态
-                    if (outlineManager)
-                    {
-                        outlineManager.SetMovementRange(_currentFreeSet, _currentCostSet);
-                        outlineManager.SetState(OutlineState.Movement);
-                    }
-
+                    if (ap > 0) foreach (var c in center.Disk(totalRange)) if (!_currentFreeSet.Contains(c)) _currentCostSet.Add(c);
+                    if (outlineManager) { outlineManager.SetMovementRange(_currentFreeSet, _currentCostSet); outlineManager.SetState(OutlineState.Movement); }
                     if (_hoverCache.HasValue) OnHoverChanged(_hoverCache);
                 }
                 return;
             }
-
             if (debugRangeMode != RangeMode.None && _hoverCache.HasValue && outlineManager)
             {
                 var set = new HashSet<HexCoords>();
-                if (debugRangeMode == RangeMode.Disk) foreach (var c in _hoverCache.Value.Disk(debugRadius)) set.Add(c);
-                else foreach (var c in _hoverCache.Value.Ring(debugRadius)) set.Add(c);
-
-                // Debug 模式暂用 FreeDrawer 显示
-                outlineManager.SetMovementRange(set, null);
-                outlineManager.SetState(OutlineState.Movement);
+                if (debugRangeMode == RangeMode.Disk) foreach (var c in _hoverCache.Value.Disk(debugRadius)) set.Add(c); else foreach (var c in _hoverCache.Value.Ring(debugRadius)) set.Add(c);
+                outlineManager.SetMovementRange(set, null); outlineManager.SetState(OutlineState.Movement);
             }
         }
     }

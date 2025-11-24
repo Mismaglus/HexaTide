@@ -17,7 +17,7 @@ namespace Game.Battle
         public AbilityRunner runner;
         public BattleRules rules;
 
-        // 视觉引用删掉了，因为不需要了
+        public GridOutlineManager outlineManager;
 
         private EnemyBrain _brain;
         private UnitMover _mover;
@@ -28,9 +28,11 @@ namespace Game.Battle
             _brain = GetComponent<EnemyBrain>();
             _mover = GetComponent<UnitMover>();
             _unit = GetComponent<BattleUnit>();
+
             if (queue == null) queue = FindFirstObjectByType<ActionQueue>();
             if (runner == null) runner = FindFirstObjectByType<AbilityRunner>();
             if (rules == null) rules = FindFirstObjectByType<BattleRules>();
+            if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
         }
 
         public void OnTurnStart() { _unit?.ResetTurnResources(); }
@@ -40,14 +42,14 @@ namespace Game.Battle
         {
             if (_brain == null) yield break;
 
-            // 1. 思考
             AIPlan plan = _brain.Think();
 
             if (plan.isValid)
             {
-                Debug.Log($"[EnemyAI] 行动: 移动到 {plan.moveDest} -> 攻击 {plan.target?.name ?? "Ground"}");
+                // 1. 清除旧的预警
+                if (outlineManager) outlineManager.ClearPlayerIntent();
 
-                // 2. 直接执行移动
+                // 2. 执行移动
                 if (!plan.moveDest.Equals(_unit.UnitRef.Coords))
                 {
                     var path = HexPathfinder.FindPath(_unit.UnitRef.Coords, plan.moveDest, rules, _unit.UnitRef);
@@ -57,18 +59,27 @@ namespace Game.Battle
                     }
                 }
 
-                // 3. 直接执行技能
-                var ctx = new AbilityContext { Caster = _unit, Origin = plan.moveDest };
-                if (plan.target != null) ctx.TargetUnits.Add(plan.target);
-                ctx.TargetTiles.Add(plan.targetCell);
+                // 3. 执行技能 (如果有)
+                if (plan.ability != null)
+                {
+                    var ctx = new AbilityContext { Caster = _unit, Origin = plan.moveDest };
+                    if (plan.target != null) ctx.TargetUnits.Add(plan.target);
+                    ctx.TargetTiles.Add(plan.targetCell);
 
-                queue.Enqueue(new AbilityAction(plan.ability, ctx, runner));
+                    queue.Enqueue(new AbilityAction(plan.ability, ctx, runner));
+                }
+                else
+                {
+                    // 只有移动，没有攻击
+                    Debug.Log($"[EnemyAI] {name} 仅移动 (追击)");
+                }
 
                 yield return queue.RunAll();
             }
             else
             {
-                yield return new WaitForSeconds(0.2f); // 稍微发呆一下表示“我在思考但放弃了”
+                Debug.Log($"[EnemyAI] {name} 发呆");
+                yield return new WaitForSeconds(0.2f);
             }
         }
     }

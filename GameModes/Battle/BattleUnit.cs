@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Game.Units;
 using Game.Core;
 using Game.Battle.Abilities;
-using Game.Grid; // 需要引用 Grid 系统来移除占位
+using Game.Grid;
 
 namespace Game.Battle
 {
@@ -22,12 +22,22 @@ namespace Game.Battle
         private UnitAttributes _attributes;
         public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
 
-        // 代理属性
+        // ⭐ 新增：资源变化事件，供 UI 和 SelectionManager 监听
+        public event System.Action OnResourcesChanged;
+
         public int MaxAP => Attributes.Core.MaxAP;
         public int CurAP
         {
             get => Attributes.Core.CurrentAP;
-            private set => Attributes.Core.CurrentAP = Mathf.Clamp(value, 0, MaxAP);
+            private set
+            {
+                int clamped = Mathf.Clamp(value, 0, MaxAP);
+                if (Attributes.Core.CurrentAP != clamped)
+                {
+                    Attributes.Core.CurrentAP = clamped;
+                    NotifyStateChange();
+                }
+            }
         }
 
         [Header("Skills")]
@@ -46,20 +56,22 @@ namespace Game.Battle
             _animator = GetComponentInChildren<Animator>();
         }
 
+        // ⭐ 供外部（如 UnitMover）调用，手动触发刷新
+        public void NotifyStateChange()
+        {
+            OnResourcesChanged?.Invoke();
+        }
+
         public void ResetTurnResources()
         {
-            // 1. AP 回满
             CurAP = MaxAP;
-
-            // 2. MP 恢复
             int regen = Attributes.Core.MPRecovery;
             if (regen > 0 && Attributes.Core.MP < Attributes.Core.MPMax)
             {
                 Attributes.Core.MP = Mathf.Min(Attributes.Core.MP + regen, Attributes.Core.MPMax);
             }
-
-            // 3. 重置移动 (直接操作 Attributes)
             Attributes.Core.CurrentStride = Attributes.Core.Stride;
+            NotifyStateChange();
         }
 
         public bool TrySpendAP(int cost = 1)
@@ -67,6 +79,7 @@ namespace Game.Battle
             if (cost <= 0) return true;
             if (CurAP < cost) return false;
             CurAP -= cost;
+            // Setter 自动触发 Notify
             return true;
         }
 
@@ -75,6 +88,7 @@ namespace Game.Battle
             if (cost <= 0) return true;
             if (Attributes.Core.MP < cost) return false;
             Attributes.Core.MP -= cost;
+            NotifyStateChange();
             return true;
         }
 
@@ -82,72 +96,52 @@ namespace Game.Battle
         {
             if (amount <= 0) return;
             CurAP += amount;
+            // Setter 自动触发 Notify
         }
 
         public void SetMaxAP(int value, bool refill = true)
         {
             Attributes.Core.MaxAP = Mathf.Max(0, value);
             if (refill) CurAP = MaxAP;
+            else NotifyStateChange();
         }
 
-        // ⭐⭐⭐ 新增：受伤逻辑 ⭐⭐⭐
         public void TakeDamage(int amount)
         {
-            if (Attributes.Core.HP <= 0) return; // 已经死了
-
-            // 扣血 (防止负数)
+            if (Attributes.Core.HP <= 0) return;
             Attributes.Core.HP = Mathf.Max(0, Attributes.Core.HP - amount);
+            NotifyStateChange();
 
             Debug.Log($"{name} took {amount} damage. HP: {Attributes.Core.HP}/{Attributes.Core.HPMax}");
 
             if (Attributes.Core.HP > 0)
             {
-                // 活着：播放受击动画
                 if (_hitReaction) _hitReaction.Play();
             }
             else
             {
-                // 死了：进入死亡流程
                 Die();
             }
         }
 
-        // ⭐⭐⭐ 新增：死亡逻辑 ⭐⭐⭐
         private void Die()
         {
             Debug.Log($"💀 {name} has DIED!");
+            if (_animator) _animator.SetTrigger("Die");
 
-            // 1. 播放死亡动画
-            if (_animator)
-            {
-                _animator.SetTrigger("Die");
-                // 如果你有死亡状态机，可能需要 setBool("IsDead", true)
-            }
-
-            // 2. 清理网格占位 (非常重要！否则尸体会变成空气墙挡路)
-            // 尝试找到全局的 GridOccupancy
             var occupancy = FindFirstObjectByType<GridOccupancy>();
-            if (occupancy)
-            {
-                occupancy.Unregister(UnitRef);
-            }
+            if (occupancy) occupancy.Unregister(UnitRef);
 
-            // 3. 从选中系统中移除
             var selection = FindFirstObjectByType<SelectionManager>();
             if (selection && selection.SelectedUnit == UnitRef)
             {
-                // 如果死的是当前选中的单位，取消选中
-                // 这里 SelectionManager 可能没有公开 Deselect，但我们可以让它选 null
-                // 更好的做法是在 SelectionManager 里加个 OnUnitDied 处理，或者直接 Destroy 会自动触发空检查
+                // SelectionManager 会处理空引用
             }
 
-            // 4. 通知战斗状态机 (处理胜负)
             if (BattleStateMachine.Instance != null)
             {
                 BattleStateMachine.Instance.OnUnitDied(this);
             }
-
-            // 5. 销毁物体 (延迟 2秒 让死亡动画播完)
             Destroy(gameObject, 2.0f);
         }
     }

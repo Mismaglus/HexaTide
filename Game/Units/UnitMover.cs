@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
 using Game.Grid;
-using Game.Battle; // ⭐ 增加引用，为了调用 BattleIntentSystem
+using Game.Battle; // 引用 BattleUnit
 
 namespace Game.Units
 {
@@ -12,8 +12,6 @@ namespace Game.Units
     [RequireComponent(typeof(UnitAttributes))]
     public class UnitMover : MonoBehaviour
     {
-        // ... (之前的变量保持不变) ...
-        // 只读属性，兼容性访问
         public int strideLeft => _attributes != null ? _attributes.Core.CurrentStride : 0;
 
         [Header("Motion")]
@@ -119,28 +117,33 @@ namespace Game.Units
             IsMoving = false;
             OnPathCompleted?.Invoke();
 
-            // ⭐⭐ 新增：移动完全结束后，通知意图系统更新敌人预警
+            // 通知预警系统
             if (BattleIntentSystem.Instance != null)
-            {
                 BattleIntentSystem.Instance.UpdateIntents();
-            }
-            // ⭐⭐
 
             onComplete?.Invoke();
         }
 
-        // ... (其余代码保持不变: ConsumeResources, CoMoveLerpOnly, TryStepTo, CanStepTo, RebuildTileCache, TryGetTileTopWorld) ...
-        // 请保留你原本文件里的这些辅助方法，这里为了简洁省略了
-
         void ConsumeResources(int cost)
         {
             if (_attributes == null) return;
-            if (_attributes.Core.CurrentStride >= cost) _attributes.Core.CurrentStride -= cost;
+
+            if (_attributes.Core.CurrentStride >= cost)
+            {
+                _attributes.Core.CurrentStride -= cost;
+            }
             else
             {
                 int apNeeded = cost - _attributes.Core.CurrentStride;
                 _attributes.Core.CurrentStride = 0;
                 _attributes.Core.CurrentAP = Mathf.Max(0, _attributes.Core.CurrentAP - apNeeded);
+            }
+
+            // ⭐ 关键：通知 BattleUnit 资源变了，这会触发 SelectionManager 重绘范围
+            if (_unit != null)
+            {
+                var bu = _unit.GetComponent<BattleUnit>();
+                if (bu) bu.NotifyStateChange();
             }
         }
 
@@ -148,10 +151,17 @@ namespace Game.Units
         {
             Vector3 a; TryGetTileTopWorld(from, out a);
             Vector3 b; TryGetTileTopWorld(dst, out b);
+
             Vector3 dir = b - a;
             if (dir.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+
             float t = 0f;
-            while (t < 1f) { t += Time.deltaTime / Mathf.Max(0.0001f, dur); transform.position = Vector3.Lerp(a, b, Mathf.SmoothStep(0f, 1f, t)); yield return null; }
+            while (t < 1f)
+            {
+                t += Time.deltaTime / Mathf.Max(0.0001f, dur);
+                transform.position = Vector3.Lerp(a, b, Mathf.SmoothStep(0f, 1f, t));
+                yield return null;
+            }
             transform.position = b;
         }
 
@@ -187,7 +197,11 @@ namespace Game.Units
         {
             _tileCache.Clear();
             if (_grid == null) return;
-            foreach (var tile in _grid.EnumerateTiles()) { if (tile != null && !_tileCache.ContainsKey(tile.Coords)) _tileCache[tile.Coords] = tile.transform; }
+            foreach (var tile in _grid.EnumerateTiles())
+            {
+                if (tile != null && !_tileCache.ContainsKey(tile.Coords))
+                    _tileCache[tile.Coords] = tile.transform;
+            }
             _cachedGridVersion = _grid.Version;
         }
 

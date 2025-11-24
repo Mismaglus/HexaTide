@@ -5,12 +5,10 @@ using Core.Hex;
 using Game.Units;
 using Game.Battle.AI;
 using Game.Battle.Abilities;
+using Game.Grid;
 
 namespace Game.Battle
 {
-    /// <summary>
-    /// 负责在玩家回合实时显示敌人的意图（预警）。
-    /// </summary>
     public class BattleIntentSystem : MonoBehaviour
     {
         public static BattleIntentSystem Instance { get; private set; }
@@ -21,6 +19,10 @@ namespace Game.Battle
         private List<EnemyBrain> _enemies = new List<EnemyBrain>();
         private BattleStateMachine _sm;
 
+        // 缓存计算结果
+        private HashSet<HexCoords> _dangerZone = new();
+        private List<(Vector3, Vector3)> _arrowList = new();
+
         void Awake()
         {
             Instance = this;
@@ -28,93 +30,71 @@ namespace Game.Battle
             _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
-        void Start()
-        {
-            // 延迟一帧初始化，确保所有敌人的 Start() 都跑完了，属性都初始化好了
-            StartCoroutine(InitRoutine());
-        }
+        void Start() { StartCoroutine(InitRoutine()); }
+        IEnumerator InitRoutine() { yield return null; RefreshEnemyList(); if (_sm != null && _sm.CurrentTurn == TurnSide.Player) UpdateIntents(); }
+        void OnEnable() { if (_sm == null) _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>(); if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged; }
+        void OnDisable() { if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged; }
 
-        IEnumerator InitRoutine()
-        {
-            yield return null;
-            RefreshEnemyList();
-
-            // 如果游戏刚开始就是玩家回合，计算一次
-            if (_sm != null && _sm.CurrentTurn == TurnSide.Player)
-            {
-                UpdateIntents();
-            }
-        }
-
-        void OnEnable()
-        {
-            if (_sm == null) _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
-            if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged;
-        }
-
-        void OnDisable()
-        {
-            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
-        }
-
-        // ⭐ 核心修复：监听回合切换
         void HandleTurnChanged(TurnSide side)
         {
             if (side == TurnSide.Player)
             {
-                // 轮到玩家了：刷新列表（可能有新敌人或死掉的），然后计算意图
+                // 玩家回合：计算并显示
                 RefreshEnemyList();
                 UpdateIntents();
-                Debug.Log("[BattleIntentSystem] Player Turn Started -> Updated Enemy Intents");
             }
             else
             {
-                // 轮到敌人了：清除地上的红圈，交给 EnemyTurnActor 自己去画它的行动
-                if (outlineManager) outlineManager.SetEnemyIntent(null);
+                // 敌人回合：清除所有显示
+                if (outlineManager) outlineManager.SetEnemyIntent(null, null);
             }
         }
 
         public void RefreshEnemyList()
         {
             _enemies.Clear();
-            // 重新查找所有活着的敌人大脑
             var all = FindObjectsByType<EnemyBrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var brain in all)
             {
-                // 简单的存活检查
                 var bu = brain.GetComponent<BattleUnit>();
-                if (bu != null && bu.Attributes.Core.HP > 0)
-                {
-                    _enemies.Add(brain);
-                }
+                if (bu != null && bu.Attributes.Core.HP > 0) _enemies.Add(brain);
             }
         }
 
         public void UpdateIntents()
         {
-            // 双重检查：如果当前不是玩家回合，不要画预警（除非你希望任何时候都看得到）
             if (_sm != null && _sm.CurrentTurn != TurnSide.Player) return;
             if (!outlineManager) return;
 
-            HashSet<HexCoords> dangerZone = new HashSet<HexCoords>();
+            _dangerZone.Clear();
+            _arrowList.Clear();
+
+            var grid = FindFirstObjectByType<BattleHexGrid>();
 
             foreach (var enemy in _enemies)
             {
                 if (enemy == null) continue;
 
-                // 让敌人思考当前局势下的最佳方案
                 var plan = enemy.Think();
-
                 if (plan.isValid)
                 {
-                    // 获取该技能的打击范围
+                    // 1. 收集红圈
                     var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability);
-                    dangerZone.UnionWith(area);
+                    _dangerZone.UnionWith(area);
+
+                    // 2. 收集箭头
+                    // 如果目标不是自己（Self Buff），则画箭头
+                    if (!plan.targetCell.Equals(enemy.GetComponent<Unit>().Coords))
+                    {
+                        Vector3 start = enemy.transform.position;
+                        Vector3 end = grid.GetTileWorldPosition(plan.targetCell);
+                        _arrowList.Add((start, end));
+                    }
                 }
             }
 
             // 提交给 Manager
-            outlineManager.SetEnemyIntent(dangerZone);
+            outlineManager.SetEnemyIntent(_dangerZone, _arrowList);
         }
     }
 }

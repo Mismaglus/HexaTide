@@ -140,18 +140,18 @@ namespace Game.Battle
                     bool showArrow = !hoverC.Equals(_caster.UnitRef.Coords);
 
                     // 4. 提交给 Manager
-                    outlineManager.ShowIntent(startPos, endPos, aoeTiles, showArrow);
+                    outlineManager.ShowPlayerIntent(startPos, endPos, aoeTiles, showArrow);
                 }
                 else if (outlineManager)
                 {
                     // 无效目标，清除意图显示
-                    outlineManager.ClearIntent();
+                    outlineManager.ClearPlayerIntent();
                 }
             }
             else
             {
                 if (gridCursor) gridCursor.Hide();
-                if (outlineManager) outlineManager.ClearIntent();
+                if (outlineManager) outlineManager.ClearPlayerIntent();
                 Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
             }
         }
@@ -200,7 +200,7 @@ namespace Game.Battle
             if (outlineManager)
             {
                 outlineManager.ClearAbilityRange();
-                outlineManager.ClearIntent(); // ⭐ 记得清理意图
+                outlineManager.ClearPlayerIntent(); // ⭐ 记得清理意图
 
                 if (selectionManager != null && selectionManager.SelectedUnit != null)
                     outlineManager.SetState(OutlineState.Movement);

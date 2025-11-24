@@ -1,8 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Core.Hex;
-using Game.Common; // 引用 HexHighlighter
-using Game.UI;     // 引用 RangeOutlineDrawer, BattleArrow
+using Game.Common;
+using Game.UI;
 
 namespace Game.Battle
 {
@@ -20,32 +20,37 @@ namespace Game.Battle
         public RangeOutlineDrawer movementCostDrawer;
         public RangeOutlineDrawer abilityRangeDrawer;
 
-        [Header("Intent Visuals")]
-        public RangeOutlineDrawer impactDrawer;       // 负责画 AOE 的边框
-        public BattleArrow intentionArrow;            // 负责画箭头
-        public HexHighlighter highlighter;            // 负责画 AOE 的底色
-
-        [Header("Visual Settings")]
-        public Color impactLineColor = new Color(1f, 0.2f, 0.2f, 1f); // 强制指定 Impact 线框颜色(红)
+        [Header("Player Intent")]
+        public RangeOutlineDrawer impactDrawer;
+        public BattleArrow intentionArrow;
+        public HexHighlighter highlighter;
+        public Color impactLineColor = new Color(1f, 0.2f, 0.2f, 1f);
 
         [Header("Enemy Intent")]
-        public RangeOutlineDrawer enemyIntentDrawer;
+        public RangeOutlineDrawer enemyIntentDrawer; // 危险区域红圈
+
+        [Header("Enemy Arrow Pool")]
+        public BattleArrow arrowPrefab;              // ⭐ 必须拖拽 BattleArrow 的 Prefab
+        public Transform arrowPoolRoot;              // 可选：箭头生成的父节点
 
         // Cache Data
         private readonly HashSet<HexCoords> _moveFree = new();
         private readonly HashSet<HexCoords> _moveCost = new();
         private readonly HashSet<HexCoords> _abilityRange = new();
         private readonly HashSet<HexCoords> _impactArea = new();
-        private readonly HashSet<HexCoords> _enemyIntent = new();
+        private readonly HashSet<HexCoords> _enemyIntentTiles = new();
+
+        // 敌方箭头数据
+        private readonly List<(Vector3 s, Vector3 e)> _enemyArrowData = new();
+        private readonly List<BattleArrow> _spawnedArrows = new();
 
         private OutlineState _currentState = OutlineState.None;
-
-        // ⭐ 开关：是否允许显示敌方意图 (用于 UI 按钮手动切换)
         private bool _showEnemyIntent = true;
 
         void Awake()
         {
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(FindObjectsInactive.Exclude);
+            if (arrowPoolRoot == null) arrowPoolRoot = transform;
         }
 
         // === 状态控制 ===
@@ -57,10 +62,9 @@ namespace Game.Battle
             RefreshVisuals();
 
             if (newState != OutlineState.AbilityTargeting)
-                ClearIntent();
+                ClearPlayerIntent();
         }
 
-        // ⭐ 新增：手动切换意图显示的接口
         public void ToggleEnemyIntent(bool isOn)
         {
             _showEnemyIntent = isOn;
@@ -96,55 +100,36 @@ namespace Game.Battle
             RefreshVisuals();
         }
 
-        public void SetEnemyIntent(IEnumerable<HexCoords> dangerZone)
+        // ⭐⭐⭐ 核心：接收敌方意图数据 (区域 + 箭头列表)
+        public void SetEnemyIntent(IEnumerable<HexCoords> dangerZone, List<(Vector3, Vector3)> arrows)
         {
-            _enemyIntent.Clear();
-            if (dangerZone != null) _enemyIntent.UnionWith(dangerZone);
+            _enemyIntentTiles.Clear();
+            if (dangerZone != null) _enemyIntentTiles.UnionWith(dangerZone);
+
+            _enemyArrowData.Clear();
+            if (arrows != null) _enemyArrowData.AddRange(arrows);
+
             RefreshVisuals();
         }
 
-        // === 核心功能：显示意图 ===
-        public void ShowIntent(Vector3 startWorldPos, Vector3 endWorldPos, IEnumerable<HexCoords> impactTiles, bool showArrow)
+        // === 玩家意图 (单体) ===
+        public void ShowPlayerIntent(Vector3 start, Vector3 end, IEnumerable<HexCoords> impact, bool arrow)
         {
-            // 1. 更新缓存
             _impactArea.Clear();
-            if (impactTiles != null) _impactArea.UnionWith(impactTiles);
+            if (impact != null) _impactArea.UnionWith(impact);
 
-            // 2. 显示线框 (Outline)
-            if (impactDrawer != null)
+            if (impactDrawer)
             {
-                if (_impactArea.Count > 0)
-                {
-                    impactDrawer.outlineColor = impactLineColor;
-                    impactDrawer.Show(_impactArea);
-                }
-                else
-                {
-                    impactDrawer.Hide();
-                }
+                if (_impactArea.Count > 0) { impactDrawer.outlineColor = impactLineColor; impactDrawer.Show(_impactArea); }
+                else impactDrawer.Hide();
             }
+            if (highlighter) highlighter.SetImpact(_impactArea);
 
-            // 3. 显示底色 (Highlight)
-            if (highlighter != null)
-            {
-                highlighter.SetImpact(_impactArea);
-            }
-
-            // 4. 显示箭头 (Arrow)
-            if (showArrow && intentionArrow != null)
-            {
-                // 稍微抬高防止穿模
-                startWorldPos.y += 0.8f;
-                endWorldPos.y += 0.2f;
-                intentionArrow.SetPositions(startWorldPos, endWorldPos);
-            }
-            else if (intentionArrow != null)
-            {
-                intentionArrow.Hide();
-            }
+            if (arrow && intentionArrow) { start.y += 0.8f; end.y += 0.2f; intentionArrow.SetPositions(start, end); }
+            else if (intentionArrow) intentionArrow.Hide();
         }
 
-        public void ClearIntent()
+        public void ClearPlayerIntent()
         {
             _impactArea.Clear();
             if (impactDrawer) impactDrawer.Hide();
@@ -152,60 +137,79 @@ namespace Game.Battle
             if (highlighter) highlighter.SetImpact(null);
         }
 
-        // === 内部刷新逻辑 (核心修改) ===
+        // === 内部刷新逻辑 ===
 
         private void RefreshVisuals()
         {
-            // 1. 移动范围层 (Base Drawers)
-            switch (_currentState)
+            // 1. 基础层 (移动)
+            if (_currentState == OutlineState.Movement)
             {
-                case OutlineState.Movement:
-                    ShowDrawer(movementFreeDrawer, _moveFree);
-                    ShowDrawer(movementCostDrawer, _moveCost);
-                    break;
-
-                default:
-                    // 在 None 或 Targeting 状态下，隐藏移动范围
-                    HideDrawer(movementFreeDrawer);
-                    HideDrawer(movementCostDrawer);
-                    break;
-            }
-
-            // 2. 技能范围层 (Range)
-            if (_currentState == OutlineState.AbilityTargeting)
-            {
-                ShowDrawer(abilityRangeDrawer, _abilityRange);
+                ShowDrawer(movementFreeDrawer, _moveFree);
+                ShowDrawer(movementCostDrawer, _moveCost);
             }
             else
             {
-                HideDrawer(abilityRangeDrawer);
+                HideDrawer(movementFreeDrawer);
+                HideDrawer(movementCostDrawer);
             }
 
-            // 3. ⭐ 敌方意图层 (Enemy Intent)
-            // 逻辑：只要开关是开的，且不在“释放技能”状态，就一直显示
-            // (None 状态下现在也会显示了，这就是“常驻”)
-            bool shouldShowIntent = _showEnemyIntent && (_currentState != OutlineState.AbilityTargeting);
+            // 2. 技能层
+            if (_currentState == OutlineState.AbilityTargeting)
+                ShowDrawer(abilityRangeDrawer, _abilityRange);
+            else
+                HideDrawer(abilityRangeDrawer);
 
-            if (shouldShowIntent)
+            // 3. 敌方意图层 (关键逻辑)
+            // 只要不是在“瞄准技能”，就显示敌人意图
+            bool showEnemy = _showEnemyIntent && (_currentState != OutlineState.AbilityTargeting);
+
+            if (showEnemy)
             {
-                ShowDrawer(enemyIntentDrawer, _enemyIntent);
+                ShowDrawer(enemyIntentDrawer, _enemyIntentTiles);
+                DrawEnemyArrows(); // 画箭头
             }
             else
             {
                 HideDrawer(enemyIntentDrawer);
+                HideEnemyArrows(); // 藏箭头
             }
         }
 
-        void ShowDrawer(RangeOutlineDrawer drawer, HashSet<HexCoords> tiles)
+        // --- 箭头池管理 ---
+        void DrawEnemyArrows()
         {
-            if (drawer == null) return;
-            if (tiles != null && tiles.Count > 0) drawer.Show(tiles);
-            else drawer.Hide();
+            if (arrowPrefab == null) return;
+
+            // 1. 确保池子够大
+            while (_spawnedArrows.Count < _enemyArrowData.Count)
+            {
+                var go = Instantiate(arrowPrefab, arrowPoolRoot);
+                _spawnedArrows.Add(go);
+            }
+
+            // 2. 激活并设置位置
+            for (int i = 0; i < _spawnedArrows.Count; i++)
+            {
+                if (i < _enemyArrowData.Count)
+                {
+                    var (s, e) = _enemyArrowData[i];
+                    // 稍微抬高，防止Z-fighting
+                    s.y += 0.8f; e.y += 0.2f;
+                    _spawnedArrows[i].SetPositions(s, e);
+                }
+                else
+                {
+                    _spawnedArrows[i].Hide();
+                }
+            }
         }
 
-        void HideDrawer(RangeOutlineDrawer drawer)
+        void HideEnemyArrows()
         {
-            if (drawer != null) drawer.Hide();
+            foreach (var a in _spawnedArrows) a.Hide();
         }
+
+        void ShowDrawer(RangeOutlineDrawer d, HashSet<HexCoords> t) { if (d) { if (t != null && t.Count > 0) d.Show(t); else d.Hide(); } }
+        void HideDrawer(RangeOutlineDrawer d) { if (d) d.Hide(); }
     }
 }

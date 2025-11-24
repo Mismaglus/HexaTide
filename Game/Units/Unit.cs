@@ -3,8 +3,8 @@ using Game.Core;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Battle; // 引用 SelectionManager
-using Game.Grid;   // 引用 IHexGridProvider
+using Game.Battle;
+using Game.Grid;
 
 namespace Game.Units
 {
@@ -26,7 +26,9 @@ namespace Game.Units
         [Header("Motion")]
         public float secondsPerTile = 0.2f;
         public float unitYOffset = 0.02f;
-        public bool faceMovement = false;
+
+        [Tooltip("如果是3D模型，勾选此项以在移动时旋转朝向")]
+        public bool faceMovement = true; // ? 3D 项目通常开启这个
         public bool autoInitializeIfMissing = true;
 
         [Header("Animation")]
@@ -35,26 +37,24 @@ namespace Game.Units
         public HexCoords Coords { get; private set; }
         public bool IsMoving => _moveRoutine != null;
 
-        // 这个事件现在既可以是 Unit 自己移动触发，也可以是 UnitMover 触发
+        // 事件：(Unit, From, To)
         public System.Action<Unit, HexCoords, HexCoords> OnMoveFinished;
 
         Dictionary<HexCoords, Transform> _tileMap = new();
         uint _lastGridVersion;
         Coroutine _moveRoutine;
         bool _hasValidCoords;
-        UnitVisual2D _visual2D;
-        UnitMover _moverComponent; // ? 新增缓存
+
+        UnitMover _moverComponent;
 
         void Awake()
         {
             grid = gridComponent as IHexGridProvider;
-            _visual2D = GetComponentInChildren<UnitVisual2D>(true);
             EnsureChildAnimatorController();
 
             if (!_faction) _faction = GetComponent<FactionMembership>();
 
-            // ? 核心修改：监听 UnitMover 的移动事件
-            // 这样战斗系统驱动的移动也能正确通知 GridOccupancy
+            // 监听 UnitMover 的事件，确保战斗移动也能同步状态
             _moverComponent = GetComponent<UnitMover>();
             if (_moverComponent != null)
             {
@@ -70,12 +70,10 @@ namespace Game.Units
             }
         }
 
-        // ? 当 UnitMover 完成一步时，同步更新 Coords 并转发事件
+        // 响应 UnitMover 的移动
         void HandleMoverFinished(HexCoords from, HexCoords to)
         {
-            // 确保 Unit 自己的坐标数据是最新的
             Coords = to;
-            // 转发给 GridOccupancy 和 SelectionManager
             OnMoveFinished?.Invoke(this, from, to);
         }
 
@@ -101,11 +99,9 @@ namespace Game.Units
             if (grid == null) return;
             if (_tileMap.Count == 0) RebuildTileMap();
 
-            // 尝试定位初始位置
             if (TryPickTileUnderSelf(out var c)) WarpTo(c);
             else _hasValidCoords = _tileMap.ContainsKey(Coords);
 
-            // 自动注册到 SelectionManager (进而注册到 Occupancy)
             var sel = FindFirstObjectByType<SelectionManager>(FindObjectsInactive.Exclude);
             sel?.RegisterUnit(this);
         }
@@ -164,7 +160,7 @@ namespace Game.Units
             if (TryGetTileTopWorld(c, out var top)) { transform.position = top; _hasValidCoords = true; }
         }
 
-        // 这个是 Unit 自己简单的移动逻辑 (非战斗用)
+        // 简单的非战斗移动逻辑
         public bool TryMoveTo(HexCoords target)
         {
             if (IsMoving || grid == null) return false;
@@ -178,12 +174,16 @@ namespace Game.Units
         IEnumerator MoveRoutine(Vector3 src, Vector3 dst, HexCoords target)
         {
             float t = 0f; float dur = Mathf.Max(0.01f, secondsPerTile);
-            bool rotate = faceMovement && _visual2D == null;
-            if (rotate)
+
+            // ? 纯 3D 旋转逻辑：只要开启 faceMovement 就根据移动方向旋转
+            if (faceMovement)
             {
-                Vector3 dir = dst - src; dir.y = 0;
-                if (dir.sqrMagnitude > 0.001f) transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                Vector3 dir = dst - src;
+                dir.y = 0;
+                if (dir.sqrMagnitude > 0.001f)
+                    transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
             }
+
             while (t < 1f)
             {
                 t += Time.deltaTime / dur;
@@ -191,8 +191,6 @@ namespace Game.Units
                 yield return null;
             }
             var from = Coords; Coords = target; _moveRoutine = null;
-
-            // 这里的 Invoke 主要是给非战斗移动用的
             OnMoveFinished?.Invoke(this, from, target);
         }
 

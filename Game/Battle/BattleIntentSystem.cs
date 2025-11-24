@@ -76,22 +76,20 @@ namespace Game.Battle
                 var plan = enemy.Think();
                 if (plan.isValid)
                 {
-                    // ⭐ 修复点 1: 只有当 plan 有技能时，才计算 AOE 危险区
-                    // 如果是 Chase (追击) 模式，ability 为 null，就不画红圈
+                    // 只有当 plan 有技能时，才计算 AOE 危险区
+                    // 如果是纯移动 (ability 为 null)，不展示意图
                     if (plan.ability != null)
                     {
                         var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability);
                         _dangerZone.UnionWith(area);
-                    }
 
-                    // 2. 收集箭头
-                    // 无论是攻击还是移动，只要目标点不是自己，就画箭头
-                    // 注意：如果是 Chase 模式，targetCell 是它想去的格子；如果是攻击，是攻击目标格
-                    if (!plan.targetCell.Equals(enemy.GetComponent<Unit>().Coords))
-                    {
-                        Vector3 start = enemy.transform.position;
-                        Vector3 end = grid.GetTileWorldPosition(plan.targetCell);
-                        _arrowList.Add((start, end));
+                        // 只展示攻击意图箭头，移动位置不显示
+                        if (!plan.targetCell.Equals(enemy.GetComponent<Unit>().Coords))
+                        {
+                            Vector3 start = enemy.transform.position;
+                            Vector3 end = grid.GetTileWorldPosition(plan.targetCell);
+                            _arrowList.Add((start, end));
+                        }
                     }
                 }
             }

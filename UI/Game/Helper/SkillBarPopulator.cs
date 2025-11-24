@@ -213,12 +213,20 @@ public class SkillBarPopulator : MonoBehaviour
 
             // 清除旧事件，绑定新事件
             btn.onClick.RemoveAllListeners();
-            if (ability != null)
+            bool interactable = (ability != null) && !_isLocked;
+            btn.interactable = interactable;
+
+            // 保持禁用时的视觉明亮度（不变暗）
+            var cb = btn.colors;
+            cb.disabledColor = cb.normalColor;
+            cb.fadeDuration = 0.05f;
+            btn.colors = cb;
+
+            if (interactable)
             {
                 btn.onClick.AddListener(() =>
                 {
-                    if (!_isLocked) // 只有非锁定(非敌人)状态下才响应
-                        OnSkillClicked?.Invoke(index);
+                    OnSkillClicked?.Invoke(index);
                 });
             }
         }

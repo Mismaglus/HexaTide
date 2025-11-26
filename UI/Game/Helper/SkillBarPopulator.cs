@@ -3,8 +3,6 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using Game.Battle.Abilities;
-// 如果你有 BattleUnit 的引用需求，请确保引用命名空间
-// using Game.Battle; 
 
 public class SkillBarPopulator : MonoBehaviour
 {
@@ -15,70 +13,56 @@ public class SkillBarPopulator : MonoBehaviour
     public Transform hotBarRoot;
 
     [Header("Tracery Sprites (纹饰图标)")]
-    // ⭐ 新增：用于接收你提供的三种Sprite
     public Sprite traceryPhysical;
     public Sprite traceryMagic;
     public Sprite traceryMixed;
-    public Sprite traceryEnemy; // 额外添加一个敌方槽位，如果不需要可以留空
+    public Sprite traceryEnemy;
 
-    [Header("描边/阴影偏移")]
+    [Header("Visual Settings")]
     public Vector2 outlineOffset = new Vector2(-1f, 1f);
     public Vector2 shadowOffset = new Vector2(3f, -3f);
 
-    [Header("敌方/锁定样式 (Enemy Style)")]
-    // 🔴 淡红色，保证清晰度
+    [Header("Enemy Style")]
     public Color enemyIconTint = new Color(1f, 0.85f, 0.85f, 1f);
     public Color enemyOutlineCol = new Color(0.6f, 0.2f, 0.2f, 1f);
     public Color enemyShadowCol = new Color(0.2f, 0.05f, 0.05f, 0.6f);
     public Color enemyGlowCol = new Color(0.8f, 0.0f, 0.0f, 0f);
     public float enemyGlowAlpha = 0.0f;
 
-    [Header("Icon 颜色（友军类型）")]
-    // Physical / AP
+    [Header("Ally Colors")]
     public Color physicalIconTint = new Color32(0xE8, 0xE3, 0xF7, 0xFF);
     public Color physicalOutlineCol = new Color(0.541f, 0.525f, 0.647f, 0.70f);
     public Color physicalShadowCol = new Color(0.165f, 0.152f, 0.220f, 0.55f);
 
-    // Magic / MP
     public Color magicIconTint = new Color32(0xEE, 0xF3, 0xFF, 0xFF);
     public Color magicOutlineCol = new Color(0.78f, 0.89f, 1.00f, 0.70f);
     public Color magicShadowCol = new Color(0.09f, 0.13f, 0.21f, 0.55f);
 
-    // Mixed
     public Color mixedIconTint = new Color32(0xE7, 0xF2, 0xFF, 0xFF);
     public Color mixedOutlineCol = new Color(0.7647f, 0.8353f, 0.9529f, 0.70f);
     public Color mixedShadowCol = new Color(0.15f, 0.20f, 0.28f, 0.55f);
 
-    [Header("Glow（柔光高光）颜色与强度")]
+    [Header("Glow")]
     public Material glowMaterial;
     public float glowScale = 1.10f;
-
-    // 基础透明度
     public float glowAlphaPhysical = 0.10f;
     public float glowAlphaMagic = 0.12f;
     public float glowAlphaMixed = 0.11f;
-
-    // 交互增加透明度
     public float glowHoverAdd = 0.10f;
     public float glowSelectedAdd = 0.18f;
-
-    // Glow 颜色
     public Color glowColorPhysical = new Color32(0xD9, 0xD3, 0xF3, 0xFF);
     public Color glowColorMagic = new Color32(0x73, 0xB6, 0xFF, 0xFF);
     public Color glowColorMixed = new Color32(0xE7, 0xF2, 0xFF, 0xFF);
 
-    [Header("技能数据（最多 8 个）")]
+    [Header("Data")]
     public List<Ability> abilities = new List<Ability>(MaxSlots);
 
-    // 状态记录
+    // Internal State
     struct SlotState { public bool hover; public bool selected; }
     private readonly Dictionary<int, SlotState> _slotStates = new Dictionary<int, SlotState>();
-
-    // 锁定状态
     private bool _isLocked = false;
 
-    // (可选) 如果之前增加了 currentOwner 字段用于 Tooltip，保留它
-    // [HideInInspector] public Game.Battle.BattleUnit currentOwner; 
+    // =========================================================
 
     public void SetLockedState(bool locked)
     {
@@ -94,30 +78,33 @@ public class SkillBarPopulator : MonoBehaviour
     {
         if (hotBarRoot == null)
         {
-            Debug.LogError("[SkillBarPopulator] hotBarRoot 未指定。");
+            Debug.LogError("【SkillBarPopulator】HotBarRoot 未赋值！");
             return;
         }
 
+        if (abilities == null) abilities = new List<Ability>();
+
+        // 循环处理
         for (int i = 0; i < MaxSlots; i++)
         {
             var ability = (i < abilities.Count) ? abilities[i] : null;
-            SetupSlot(i, ability);
+            try
+            {
+                SetupSlot(i, ability);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Slot {i} Setup Failed: {e.Message}");
+            }
         }
     }
 
     public void SetHover(int index, bool on)
     {
-        if (_isLocked) return; // 锁定时不响应 Hover
+        if (_isLocked) return;
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
         st.hover = on; _slotStates[index] = st;
         UpdateGlowForSlot(index);
-
-        // (可选) Tooltip 触发逻辑放在这里
-        /* if (on && index >= 0 && index < abilities.Count && abilities[index] != null)
-             Game.UI.TooltipSystem.Show(abilities[index], currentOwner);
-        else
-             Game.UI.TooltipSystem.Hide();
-        */
     }
 
     public void SetSelected(int index, bool on)
@@ -128,18 +115,42 @@ public class SkillBarPopulator : MonoBehaviour
         UpdateGlowForSlot(index);
     }
 
-    // -------------------------------------------------------------
+    // =========================================================
+
+    // ⭐ 核心修复：不再根据名字找，而是根据 hierarchy 顺序找
+    Transform GetSlotTransform(int index)
+    {
+        if (hotBarRoot == null) return null;
+        if (index >= 0 && index < hotBarRoot.childCount)
+        {
+            return hotBarRoot.GetChild(index);
+        }
+        return null;
+    }
 
     void SetupSlot(int index, Ability ability)
     {
-        var iconRoot = FindIconRoot(index);
+        // 获取当前 Slot (例如 SkillBarItem (1))
+        Transform slotTransform = GetSlotTransform(index);
+        if (slotTransform == null) return;
+
+        // 查找内部的 Item 容器
+        Transform itemInner = slotTransform.Find("Item");
+        if (itemInner == null)
+        {
+            // Debug.LogWarning($"Slot {index} ({slotTransform.name}) 缺少 'Item' 子物体");
+            return;
+        }
+
+        // 查找 Icon
+        Transform iconRoot = itemInner.Find("Icon");
         if (iconRoot == null) return;
 
-        // 禁用旧 Glow
+        // --- 基础清理 ---
         var oldGlow = iconRoot.Find("GlowLayer");
         if (oldGlow != null && oldGlow.gameObject.activeSelf) oldGlow.gameObject.SetActive(false);
 
-        // 获取组件
+        // --- 获取核心组件 ---
         var iconImg = GetOrCreateChildImage(iconRoot, "ICON");
         iconImg.raycastTarget = false;
         SetRectToStretch(iconImg.rectTransform);
@@ -150,42 +161,35 @@ public class SkillBarPopulator : MonoBehaviour
         if (glowMaterial != null) glowImg.material = glowMaterial;
         glowImg.rectTransform.localScale = Vector3.one * glowScale;
 
-        // === ⭐ 1. Hotkey 显隐控制 ===
-        Transform hotkeyRoot = FindHotkeyRoot(index);
+        // --- Hotkey 显示 ---
+        Transform hotkeyRoot = itemInner.Find("Input_Hotkey"); // 相对路径修正
         if (hotkeyRoot != null)
         {
             bool showHotkey = (ability != null) && !_isLocked;
             hotkeyRoot.gameObject.SetActive(showHotkey);
         }
 
-        // 2. 准备颜色变量
+        // --- 准备颜色数据 ---
         string typeName = GetAbilityTypeName(ability);
         Color tint, outCol, shaCol, glowCol;
         float baseAlpha;
 
-        // 3. 核心分支：敌方 vs 友军
         if (_isLocked)
         {
-            // === 敌方样式 ===
             tint = enemyIconTint;
             outCol = enemyOutlineCol;
             shaCol = enemyShadowCol;
             glowCol = enemyGlowCol;
             baseAlpha = enemyGlowAlpha;
-
-            ToggleGems(iconRoot.parent, "Enemy");
+            ToggleGems(itemInner, "Enemy");
         }
         else
         {
-            // === 友军样式 ===
             GetColorsForType(typeName, out tint, out outCol, out shaCol, out glowCol, out baseAlpha);
-            ToggleGems(iconRoot.parent, ability != null ? typeName : null);
+            ToggleGems(itemInner, ability != null ? typeName : null);
         }
 
-        // ⭐ 4. 更新 Tracery (新功能)
-        UpdateTracery(index, ability, typeName);
-
-        // 5. 应用到组件
+        // --- 应用 Icon / Outline / Shadow ---
         var outline = iconImg.GetComponent<Outline>();
         if (outline == null) outline = iconImg.gameObject.AddComponent<Outline>();
 
@@ -219,55 +223,47 @@ public class SkillBarPopulator : MonoBehaviour
             outline.enabled = false;
             shadow.enabled = false;
             glowImg.enabled = false;
-            ToggleGems(iconRoot.parent, null);
+            ToggleGems(itemInner, null);
         }
 
         if (!_slotStates.ContainsKey(index)) _slotStates[index] = new SlotState();
         UpdateGlowForSlot(index);
 
-        // 6. 处理 Button 组件交互性
-        Transform slotTransform = hotBarRoot.Find($"Item_{index:00}");
-        if (slotTransform != null)
+        // --- 按钮交互 ---
+        Button btn = slotTransform.GetComponent<Button>();
+        if (btn == null) btn = slotTransform.gameObject.AddComponent<Button>();
+
+        bool canInteract = (ability != null);
+        btn.interactable = canInteract;
+
+        var colors = btn.colors;
+        colors.disabledColor = Color.white;
+        colors.colorMultiplier = 1f;
+        btn.colors = colors;
+
+        ApplyAnimationTriggers(btn, _isLocked);
+
+        btn.onClick.RemoveAllListeners();
+        if (canInteract && !_isLocked)
         {
-            Button btn = slotTransform.GetComponent<Button>();
-            if (btn == null) btn = slotTransform.gameObject.AddComponent<Button>();
-
-            // ⭐ A. 决定是否可交互
-            bool canInteract = (ability != null);
-            btn.interactable = canInteract;
-
-            // ⭐ B. 强制修改禁用颜色为纯白
-            var colors = btn.colors;
-            colors.disabledColor = Color.white;
-            colors.colorMultiplier = 1f;
-            btn.colors = colors;
-
-            // ⭐ C. 动态调整按下动画
-            ApplyAnimationTriggers(btn, _isLocked);
-
-            // D. 绑定事件
-            btn.onClick.RemoveAllListeners();
-            if (canInteract && !_isLocked)
-            {
-                btn.onClick.AddListener(() =>
-                {
-                    OnSkillClicked?.Invoke(index);
-                });
-            }
+            btn.onClick.AddListener(() => { OnSkillClicked?.Invoke(index); });
         }
+
+        // ⭐ 更新 Tracery (使用新的 itemInner 引用)
+        UpdateTracery(itemInner, ability, typeName);
     }
 
-    // === ⭐ 新增 Tracery 逻辑 ===
-    void UpdateTracery(int index, Ability ability, string typeName)
+    // === 修改：Tracery 逻辑现在接收 Transform itemInner ===
+    void UpdateTracery(Transform itemInner, Ability ability, string typeName)
     {
-        // 找到节点
-        Transform traceryRoot = FindTraceryRoot(index);
+        if (itemInner == null) return;
+
+        Transform traceryRoot = itemInner.Find("SPR_Tracery");
         if (traceryRoot == null) return;
 
         Image traceryImg = traceryRoot.GetComponent<Image>();
         if (traceryImg == null) return;
 
-        // 如果没有技能，隐藏纹饰
         if (ability == null)
         {
             traceryImg.enabled = false;
@@ -275,40 +271,32 @@ public class SkillBarPopulator : MonoBehaviour
         }
 
         traceryImg.enabled = true;
-        Sprite targetSprite = traceryMixed; // 默认用混合
+        Sprite targetSprite = traceryMixed; // Default
 
         if (_isLocked)
         {
-            // 如果是敌人，使用 Enemy sprite (如果未赋值则fallback到 Mixed)
             if (traceryEnemy != null) targetSprite = traceryEnemy;
         }
         else
         {
-            // 根据类型选择 Sprite
             if (!string.IsNullOrEmpty(typeName))
             {
-                switch (typeName.ToLower())
-                {
-                    case "physical":
-                        targetSprite = traceryPhysical;
-                        break;
-                    case "magic":
-                    case "magical":
-                        targetSprite = traceryMagic;
-                        break;
-                    default:
-                        targetSprite = traceryMixed;
-                        break;
-                }
+                string t = typeName.ToLower();
+                if (t.Contains("phys")) targetSprite = traceryPhysical;
+                else if (t.Contains("magic") || t.Contains("magical")) targetSprite = traceryMagic;
+                else targetSprite = traceryMixed;
             }
         }
 
-        // 仅替换 Sprite，不修改 Color/Material
         if (targetSprite != null)
         {
             traceryImg.sprite = targetSprite;
         }
     }
+
+    // =========================================================
+    // 辅助方法
+    // =========================================================
 
     void ApplyAnimationTriggers(Button btn, bool isLocked)
     {
@@ -320,9 +308,9 @@ public class SkillBarPopulator : MonoBehaviour
 
     void UpdateGlowForSlot(int index)
     {
-        var iconRoot = FindIconRoot(index);
-        if (iconRoot == null) return;
-        var glow = iconRoot.Find("HL_Glow")?.GetComponent<Image>();
+        var slot = GetSlotTransform(index);
+        if (slot == null) return;
+        var glow = slot.Find("Item/Icon/HL_Glow")?.GetComponent<Image>();
         if (glow == null || !glow.enabled) return;
 
         if (_isLocked)
@@ -345,8 +333,6 @@ public class SkillBarPopulator : MonoBehaviour
         var c = glow.color; c.a = a; glow.color = c;
     }
 
-    // -------------------------------------------------------------
-
     void GetColorsForType(string typeName, out Color tint, out Color outline, out Color shadow, out Color glow, out float baseGlowAlpha)
     {
         tint = mixedIconTint;
@@ -356,38 +342,33 @@ public class SkillBarPopulator : MonoBehaviour
         baseGlowAlpha = glowAlphaMixed;
 
         if (string.IsNullOrEmpty(typeName)) return;
+        string t = typeName.ToLower();
 
-        switch (typeName.ToLower())
+        if (t.Contains("phys"))
         {
-            case "physical":
-                tint = physicalIconTint;
-                outline = physicalOutlineCol;
-                shadow = physicalShadowCol;
-                glow = glowColorPhysical;
-                baseGlowAlpha = glowAlphaPhysical;
-                break;
-
-            case "magic":
-            case "magical":
-                tint = magicIconTint;
-                outline = magicOutlineCol;
-                shadow = magicShadowCol;
-                glow = glowColorMagic;
-                baseGlowAlpha = glowAlphaMagic;
-                break;
+            tint = physicalIconTint;
+            outline = physicalOutlineCol;
+            shadow = physicalShadowCol;
+            glow = glowColorPhysical;
+            baseGlowAlpha = glowAlphaPhysical;
+        }
+        else if (t.Contains("magic") || t.Contains("magical"))
+        {
+            tint = magicIconTint;
+            outline = magicOutlineCol;
+            shadow = magicShadowCol;
+            glow = glowColorMagic;
+            baseGlowAlpha = glowAlphaMagic;
         }
     }
 
     float GetGlowBaseAlpha(string typeName)
     {
         if (string.IsNullOrEmpty(typeName)) return glowAlphaMixed;
-        switch (typeName.ToLower())
-        {
-            case "physical": return glowAlphaPhysical;
-            case "magic":
-            case "magical": return glowAlphaMagic;
-            default: return glowAlphaMixed;
-        }
+        string t = typeName.ToLower();
+        if (t.Contains("phys")) return glowAlphaPhysical;
+        if (t.Contains("magic") || t.Contains("magical")) return glowAlphaMagic;
+        return glowAlphaMixed;
     }
 
     void ToggleGems(Transform itemInner, string typeNameOrNull)
@@ -409,47 +390,14 @@ public class SkillBarPopulator : MonoBehaviour
 
         string t = typeNameOrNull.ToLower();
         bool isEnemy = t == "enemy";
-        bool onPhy = !isEnemy && t == "physical";
-        bool onMag = !isEnemy && (t == "magic" || t == "magical");
-        bool onMix = !isEnemy && t == "mixed";
+        bool onPhy = !isEnemy && t.Contains("phys");
+        bool onMag = !isEnemy && (t.Contains("magic") || t.Contains("magical"));
+        bool onMix = !isEnemy && !onPhy && !onMag;
 
         if (gPhy) gPhy.gameObject.SetActive(onPhy);
         if (gMag) gMag.gameObject.SetActive(onMag);
         if (gMix) gMix.gameObject.SetActive(onMix);
         if (gEnemy) gEnemy.gameObject.SetActive(isEnemy);
-    }
-
-    // 查找 Icon 节点: HotBar/Item_xx/Item/Icon
-    Transform FindIconRoot(int index)
-    {
-        string itemName = $"Item_{index:00}";
-        var item = hotBarRoot != null ? hotBarRoot.Find(itemName) : null;
-        if (item == null) return null;
-        var inner = item.Find("Item");
-        if (inner == null) return null;
-        return inner.Find("Icon");
-    }
-
-    // 查找 Hotkey 节点: HotBar/Item_xx/Item/Input_Hotkey
-    Transform FindHotkeyRoot(int index)
-    {
-        string itemName = $"Item_{index:00}";
-        var item = hotBarRoot != null ? hotBarRoot.Find(itemName) : null;
-        if (item == null) return null;
-        var inner = item.Find("Item");
-        if (inner == null) return null;
-        return inner.Find("Input_Hotkey");
-    }
-
-    // ⭐ 新增：查找 Tracery 节点: HotBar/Item_xx/Item/SPR_Tracery
-    Transform FindTraceryRoot(int index)
-    {
-        string itemName = $"Item_{index:00}";
-        var item = hotBarRoot != null ? hotBarRoot.Find(itemName) : null;
-        if (item == null) return null;
-        var inner = item.Find("Item");
-        if (inner == null) return null;
-        return inner.Find("SPR_Tracery");
     }
 
     Image GetOrCreateChildImage(Transform parent, string childName)

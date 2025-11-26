@@ -166,7 +166,7 @@ namespace Game.Battle.AI
         {
             if (candidates == null || candidates.Count == 0) return null;
 
-            BattleUnit best = null;
+            // BattleUnit best = null;
             int bestMetric = targetRule == TargetSelectionRule.Farthest ? int.MinValue : int.MaxValue;
 
             switch (targetRule)

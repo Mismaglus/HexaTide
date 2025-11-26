@@ -15,11 +15,15 @@ namespace Game.UI
         [Header("Root References")]
         [SerializeField] private GameObject contentRoot; // 指向 "Content" 或整个物体
         [SerializeField] private RectTransform mainRect; // 指向 HUD_SkillHover 自身的 RectTransform
+        [Header("Background Section")]
+
+        public Image backgroundTracery;
 
         [Header("Icon Section")]
         public Image iconImage;
         public Image iconGlow;
         public Image iconTracery;
+
         public GameObject[] gemObjects; // 0:Phy, 1:Mag, 2:Mix, 3:Enemy (顺序需对应代码逻辑)
 
         [Header("Name Section")]
@@ -130,7 +134,8 @@ namespace Game.UI
             {
                 iconImage.color = enemyTint;
                 iconGlow.color = enemyGlow;
-                if (iconTracery) iconTracery.sprite = traceryEnemy ?? traceryMixed;
+                if (iconTracery) iconTracery.sprite = traceryEnemy;
+                if (backgroundTracery) backgroundTracery.sprite = traceryEnemy;
                 ToggleGems(false, false, false, true);
             }
             else
@@ -140,6 +145,7 @@ namespace Game.UI
                     iconImage.color = phyTint;
                     iconGlow.color = phyGlow;
                     if (iconTracery) iconTracery.sprite = traceryPhysical;
+                    if (backgroundTracery) backgroundTracery.sprite = traceryPhysical;
                     ToggleGems(true, false, false, false);
                 }
                 else if (isMag)
@@ -147,6 +153,7 @@ namespace Game.UI
                     iconImage.color = magTint;
                     iconGlow.color = magGlow;
                     if (iconTracery) iconTracery.sprite = traceryMagic;
+                    if (backgroundTracery) backgroundTracery.sprite = traceryMagic;
                     ToggleGems(false, true, false, false);
                 }
                 else
@@ -154,6 +161,7 @@ namespace Game.UI
                     iconImage.color = mixTint;
                     iconGlow.color = mixGlow;
                     if (iconTracery) iconTracery.sprite = traceryMixed;
+                    if (backgroundTracery) backgroundTracery.sprite = traceryMixed;
                     ToggleGems(false, false, true, false);
                 }
             }

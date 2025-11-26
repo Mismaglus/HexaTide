@@ -1,0 +1,60 @@
+{
+    "entries": [
+        {
+            "key": "STAT_STR",
+            "value": "力量"
+        },
+        {
+            "key": "STAT_DEX",
+            "value": "敏捷"
+        },
+        {
+            "key": "STAT_INT",
+            "value": "智力"
+        },
+        {
+            "key": "STAT_FAI",
+            "value": "信仰"
+        },
+        {
+            "key": "DMG_PHYSICAL",
+            "value": "物理伤害"
+        },
+        {
+            "key": "DMG_MAGICAL",
+            "value": "魔法伤害"
+        },
+        {
+            "key": "UI_COOLDOWN",
+            "value": "冷却"
+        },
+        {
+            "key": "UI_TURNS",
+            "value": "回合"
+        },
+        {
+            "key": "UI_ALWAYS_READY",
+            "value": "随时可用"
+        },
+        {
+            "key": "UI_AND",
+            "value": "以及"
+        },
+        {
+            "key": "SKILL_SLASH_NAME",
+            "value": "重劈"
+        },
+        {
+            "key": "SKILL_SLASH_FLAVOR",
+            "value": "让他们安息在碎片里。"
+        },
+        {
+            "key": "SKILL_FIREBALL_NAME",
+            "value": "火球术"
+        },
+        {
+            "key": "SKILL_FIREBALL_FLAVOR",
+            "value": "艺术就是爆炸！"
+        }
+    ]
+}

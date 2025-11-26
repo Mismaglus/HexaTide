@@ -4,9 +4,11 @@ using UnityEngine.UI;
 using TMPro;
 using Game.Battle;
 using Game.Battle.Abilities;
-using Game.Battle.Abilities.Effects; // 引用 DamageEffect
-using Game.Battle.Combat; // 引用 CombatData
+using Game.Battle.Abilities.Effects;
+using Game.Battle.Combat;
 using Game.Units;
+using Game.Common;       // 引用 TextIcons
+using Game.Localization; // 引用 LocalizationManager
 
 namespace Game.UI
 {
@@ -17,23 +19,24 @@ namespace Game.UI
         [SerializeField] private RectTransform mainRect; // 指向 HUD_SkillHover 自身的 RectTransform
 
         [Header("Background Section")]
-        public Image backgroundTracery;
+        public Image backgroundTracery; // 背景上的纹饰 (可选)
 
         [Header("Icon Section")]
         public Image iconImage;
         public Image iconGlow;
         public Image iconTracery;
 
-        public GameObject[] gemObjects; // 0:Phy, 1:Mag, 2:Mix, 3:Enemy (顺序需对应代码逻辑)
+        // 顺序必须对应: 0:Phy, 1:Mag, 2:Mix, 3:Enemy
+        public GameObject[] gemObjects;
 
         [Header("Name Section")]
         public TextMeshProUGUI labelName;
         public TextMeshProUGUI labelCost;
-        public TextMeshProUGUI labelInfo; // Range & Target
+        public TextMeshProUGUI labelInfo; // 显示范围和目标图标
 
-        [Header("HUD Basic")]
+        [Header("HUD Basic (Summary)")]
         public GameObject basicRoot;
-        public TextMeshProUGUI labelSkillEffect; // 总伤害
+        public TextMeshProUGUI labelSkillEffect; // 显示总伤害 (例如: 180 + 180)
 
         [Header("HUD Description")]
         public TextMeshProUGUI labelDescription;
@@ -43,9 +46,8 @@ namespace Game.UI
         public TextMeshProUGUI labelAvailability;
 
         [Header("Visual Settings")]
-        public Vector3 hoverOffset = new Vector3(0, 80f, 0); // 在图标上方显示的偏移量
+        public Vector3 hoverOffset = new Vector3(0, 80f, 0); // 悬浮偏移量
 
-        // 资源配置 (需要与 SkillBarPopulator 保持一致)
         [Header("Tracery Assets")]
         public Sprite traceryPhysical;
         public Sprite traceryMagic;
@@ -55,7 +57,7 @@ namespace Game.UI
         [Header("Colors (RGB Only)")]
         public Color enemyTint = new Color(1f, 0.85f, 0.85f, 1f);
 
-        // Glow 颜色 (Alpha 将由下方的 Alpha Settings 覆盖)
+        // Glow 颜色基调
         public Color enemyGlow = new Color(0.8f, 0.0f, 0.0f);
         public Color phyGlow = new Color32(0xD9, 0xD3, 0xF3, 0xFF);
         public Color magGlow = new Color32(0x73, 0xB6, 0xFF, 0xFF);
@@ -72,10 +74,6 @@ namespace Game.UI
         [Range(0f, 1f)] public float alphaMixed = 0.11f;
         [Range(0f, 1f)] public float alphaEnemy = 0.0f; // 默认敌方无高光
 
-        // Hex Colors for Text
-        const string COL_AP = "#8372AB";
-        const string COL_MP = "#6A96BF";
-
         void Awake()
         {
             if (mainRect == null) mainRect = GetComponent<RectTransform>();
@@ -89,27 +87,30 @@ namespace Game.UI
             gameObject.SetActive(true);
             UpdatePosition(slotRect);
 
-            // 1. Icon & Visuals (Gems, Tracery, Glow)
+            // 1. 视觉样式 (颜色、纹饰、宝石)
             UpdateVisuals(ability, isEnemy);
 
-            // 2. Name
-            labelName.text = ability.displayName;
+            // 2. 技能名称 (支持本地化)
+            // 假设 Ability.cs 中已添加 LocalizedName 属性
+            labelName.text = ability.LocalizedName;
 
-            // 3. Cost
+            // 3. 消耗 (AP/MP)
             UpdateCost(ability);
 
-            // 4. Info (Range & Target)
+            // 4. 范围与目标 (Icon)
             UpdateInfo(ability);
 
-            // 5. Basic Effect (Total Damage)
+            // 5. 基础效果概览 (总伤害计算)
             UpdateBasicEffect(ability, caster);
 
-            // 6. Description
-            // 如果 caster 为空 (比如在图鉴里查看)，GetDynamicDescription 需要能处理 null
+            // 6. 详细描述 (读取属性计算)
+            // GetDynamicDescription 内部已处理数值计算和本地化拼接
             labelDescription.text = ability.GetDynamicDescription(caster);
 
-            // 7. Bottom Group
-            labelFlavor.text = $"<style=Italic>\"{ability.flavorText}\"</style>";
+            // 7. 风味文本 (支持本地化)
+            labelFlavor.text = $"<style=Italic>\"{ability.LocalizedFlavor}\"</style>";
+
+            // 8. 可用性状态 (CD/次数)
             UpdateAvailability(ability, caster);
         }
 
@@ -123,7 +124,7 @@ namespace Game.UI
         void UpdatePosition(RectTransform slotRect)
         {
             if (slotRect == null) return;
-            // 简单的跟随逻辑，假设 Tooltip 和 SkillBar 在同一个 Canvas 空间
+            // 简单的跟随逻辑，将 Tooltip 放置在目标 Slot 上方
             transform.position = slotRect.position + hoverOffset;
         }
 
@@ -140,11 +141,11 @@ namespace Game.UI
             if (isEnemy)
             {
                 iconImage.color = enemyTint;
-                // 设置 Alpha
                 iconGlow.color = GetColorWithAlpha(enemyGlow, alphaEnemy);
 
-                if (iconTracery) iconTracery.sprite = traceryEnemy ?? traceryMixed; // Fallback to mixed if enemy tracery missing
-                if (backgroundTracery) backgroundTracery.sprite = traceryEnemy ?? traceryMixed;
+                Sprite t = traceryEnemy ?? traceryMixed;
+                if (iconTracery) iconTracery.sprite = t;
+                if (backgroundTracery) backgroundTracery.sprite = t;
 
                 ToggleGems(false, false, false, true);
             }
@@ -153,7 +154,6 @@ namespace Game.UI
                 if (isPhy)
                 {
                     iconImage.color = phyTint;
-                    // 设置 Alpha
                     iconGlow.color = GetColorWithAlpha(phyGlow, alphaPhysical);
 
                     if (iconTracery) iconTracery.sprite = traceryPhysical;
@@ -164,7 +164,6 @@ namespace Game.UI
                 else if (isMag)
                 {
                     iconImage.color = magTint;
-                    // 设置 Alpha
                     iconGlow.color = GetColorWithAlpha(magGlow, alphaMagic);
 
                     if (iconTracery) iconTracery.sprite = traceryMagic;
@@ -175,7 +174,6 @@ namespace Game.UI
                 else
                 {
                     iconImage.color = mixTint;
-                    // 设置 Alpha
                     iconGlow.color = GetColorWithAlpha(mixGlow, alphaMixed);
 
                     if (iconTracery) iconTracery.sprite = traceryMixed;
@@ -203,33 +201,35 @@ namespace Game.UI
         void UpdateCost(Ability ability)
         {
             string costStr = "";
+            // 使用 TextIcons 的格式化方法
             if (ability.apCost > 0)
-                costStr += $"<color={COL_AP}>{ability.apCost}</color><sprite name=\"AP\"> ";
+                costStr += $"{TextIcons.FormatAP(ability.apCost)} ";
             if (ability.mpCost > 0)
-                costStr += $"<color={COL_MP}>{ability.mpCost}</color><sprite name=\"MP\">";
+                costStr += $"{TextIcons.FormatMP(ability.mpCost)}";
 
             labelCost.text = costStr;
+            // 如果无消耗则隐藏这行
             labelCost.gameObject.SetActive(!string.IsNullOrEmpty(costStr));
         }
 
         void UpdateInfo(Ability ability)
         {
-            // Range Icon
+            // 范围图标 (Range)
             string rangeIcon = ability.shape switch
             {
                 TargetShape.Cone => "<sprite name=\"Cone\">",
-                TargetShape.Disk => "<sprite name=\"Circle\">", // Assuming Disk = Circle
-                TargetShape.Ring => "<sprite name=\"Circle\">", // Fallback
+                TargetShape.Disk => "<sprite name=\"Circle\">",
+                TargetShape.Ring => "<sprite name=\"Circle\">",
                 TargetShape.Line => "<sprite name=\"Straight\">",
                 TargetShape.Single => "<sprite name=\"SingleTarget\">",
-                _ => "<sprite name=\"SingleTarget\">" // Default or MultipleTargets logic
+                _ => "<sprite name=\"SingleTarget\">" // Multi 逻辑暂缺，默认单体
             };
 
-            // Target Icon
+            // 目标图标 (Target)
             string targetIcon = ability.targetType switch
             {
-                AbilityTargetType.FriendlyUnit => "<sprite name=\"Ally\">",
-                AbilityTargetType.EnemyUnit => "<sprite name=\"Enemy\">",
+                AbilityTargetType.FriendlyUnit => "<sprite name=\"Ally\">", // 推荐用双层爱心
+                AbilityTargetType.EnemyUnit => "<sprite name=\"Enemy\">",   // 推荐用破碎心/骷髅
                 AbilityTargetType.EmptyTile => "<sprite name=\"EmptyTile\">",
                 AbilityTargetType.AnyTile => "<sprite name=\"AnyTile\">",
                 AbilityTargetType.Self => "<sprite name=\"Self\">",
@@ -247,15 +247,13 @@ namespace Game.UI
 
             if (caster != null)
             {
-                // 遍历 Effect 计算总伤
+                // 有施法者：计算真实伤害（含属性加成）
                 foreach (var effect in ability.effects)
                 {
                     if (effect is DamageEffect dmg)
                     {
                         var stats = caster.Attributes.Core;
-                        // 计算物理
                         float p = dmg.config.basePhysical + dmg.config.physScaling.Evaluate(stats);
-                        // 计算魔法
                         float m = dmg.config.baseMagical + dmg.config.magScaling.Evaluate(stats);
 
                         totalPhys += Mathf.RoundToInt(p);
@@ -266,7 +264,7 @@ namespace Game.UI
             }
             else
             {
-                // 如果没有施法者 (预览模式)，只显示基础伤害
+                // 无施法者（如在图鉴中）：只显示基础面板
                 foreach (var effect in ability.effects)
                 {
                     if (effect is DamageEffect dmg)
@@ -286,27 +284,37 @@ namespace Game.UI
 
             basicRoot.SetActive(true);
             string txt = "";
-            if (totalPhys > 0) txt += $"<sprite name=\"Physical\"> {totalPhys}";
+
+            // 使用 TextIcons 定义的图标常量
+            if (totalPhys > 0) txt += $"{TextIcons.SPR_PHYS} {totalPhys}";
+
             if (totalPhys > 0 && totalMag > 0) txt += " + ";
-            if (totalMag > 0) txt += $"<sprite name=\"Magical\"> {totalMag}";
+
+            if (totalMag > 0) txt += $"{TextIcons.SPR_MAG} {totalMag}";
 
             labelSkillEffect.text = txt;
         }
 
         void UpdateAvailability(Ability ability, BattleUnit caster)
         {
-            // 简单的可用性逻辑
+            // 动态替换逻辑：优先显示 CD 或 剩余次数
+            // 这里假设 Ability 只有静态数据，实际项目中可能需要传入 RuntimeAbility
             if (ability.cooldownTurns > 0)
-                labelAvailability.text = $"Cooldown: {ability.cooldownTurns} Turns";
+            {
+                string cdLabel = LocalizationManager.Get("UI_COOLDOWN"); // "冷却"
+                string turnLabel = LocalizationManager.Get("UI_TURNS");  // "回合"
+                labelAvailability.text = $"{cdLabel}: {ability.cooldownTurns} {turnLabel}";
+            }
             else
-                labelAvailability.text = "Always Available";
+            {
+                labelAvailability.text = LocalizationManager.Get("UI_ALWAYS_READY"); // "随时可用"
+            }
         }
 
-        // Helper copied from Populator
+        // Helper
         string GetAbilityTypeName(Ability ability)
         {
             if (ability == null) return "Mixed";
-            // 简化版反射，或者直接访问 public field
             if (ability.abilityType == AbilityType.Physical) return "Physical";
             if (ability.abilityType == AbilityType.Magical) return "Magical";
             return "Mixed";

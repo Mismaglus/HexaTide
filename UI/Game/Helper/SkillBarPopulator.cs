@@ -3,6 +3,7 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using Game.Battle.Abilities;
+using Game.UI; // 引用 SkillTooltipController 所在的命名空间
 
 public class SkillBarPopulator : MonoBehaviour
 {
@@ -11,6 +12,12 @@ public class SkillBarPopulator : MonoBehaviour
 
     [Header("Scene Refs")]
     public Transform hotBarRoot;
+
+    // ⭐ Tooltip 引用
+    public SkillTooltipController tooltipController;
+
+    // ⭐ 当前持有的单位 (由 SkillBarController 赋值)
+    [HideInInspector] public Game.Battle.BattleUnit currentOwner;
 
     [Header("Tracery Sprites (纹饰图标)")]
     public Sprite traceryPhysical;
@@ -62,6 +69,13 @@ public class SkillBarPopulator : MonoBehaviour
     private readonly Dictionary<int, SlotState> _slotStates = new Dictionary<int, SlotState>();
     private bool _isLocked = false;
 
+    void Awake()
+    {
+        // 自动查找 Tooltip 控制器
+        if (tooltipController == null)
+            tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
+    }
+
     // =========================================================
 
     public void SetLockedState(bool locked)
@@ -101,10 +115,31 @@ public class SkillBarPopulator : MonoBehaviour
 
     public void SetHover(int index, bool on)
     {
-        if (_isLocked) return;
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
         st.hover = on; _slotStates[index] = st;
         UpdateGlowForSlot(index);
+
+        // ⭐⭐⭐ Tooltip 触发逻辑 ⭐⭐⭐
+        if (tooltipController != null)
+        {
+            if (on)
+            {
+                var ability = (index >= 0 && index < abilities.Count) ? abilities[index] : null;
+                if (ability != null)
+                {
+                    // 获取当前 Slot 的 RectTransform 以便 Tooltip 跟随或定位
+                    var slotTrans = GetSlotTransform(index);
+                    var rect = slotTrans != null ? slotTrans.GetComponent<RectTransform>() : null;
+
+                    // 显示 Tooltip (传入当前技能、施法者、是否敌方状态、位置)
+                    tooltipController.Show(ability, currentOwner, _isLocked, rect);
+                }
+            }
+            else
+            {
+                tooltipController.Hide();
+            }
+        }
     }
 
     public void SetSelected(int index, bool on)
@@ -117,7 +152,7 @@ public class SkillBarPopulator : MonoBehaviour
 
     // =========================================================
 
-    // ⭐ 核心修复：不再根据名字找，而是根据 hierarchy 顺序找
+    // ⭐ 核心修复：通过 Hierarchy 索引查找，而非名称
     Transform GetSlotTransform(int index)
     {
         if (hotBarRoot == null) return null;
@@ -130,17 +165,13 @@ public class SkillBarPopulator : MonoBehaviour
 
     void SetupSlot(int index, Ability ability)
     {
-        // 获取当前 Slot (例如 SkillBarItem (1))
+        // 获取当前 Slot
         Transform slotTransform = GetSlotTransform(index);
         if (slotTransform == null) return;
 
         // 查找内部的 Item 容器
         Transform itemInner = slotTransform.Find("Item");
-        if (itemInner == null)
-        {
-            // Debug.LogWarning($"Slot {index} ({slotTransform.name}) 缺少 'Item' 子物体");
-            return;
-        }
+        if (itemInner == null) return;
 
         // 查找 Icon
         Transform iconRoot = itemInner.Find("Icon");
@@ -162,7 +193,7 @@ public class SkillBarPopulator : MonoBehaviour
         glowImg.rectTransform.localScale = Vector3.one * glowScale;
 
         // --- Hotkey 显示 ---
-        Transform hotkeyRoot = itemInner.Find("Input_Hotkey"); // 相对路径修正
+        Transform hotkeyRoot = itemInner.Find("Input_Hotkey");
         if (hotkeyRoot != null)
         {
             bool showHotkey = (ability != null) && !_isLocked;
@@ -233,8 +264,10 @@ public class SkillBarPopulator : MonoBehaviour
         Button btn = slotTransform.GetComponent<Button>();
         if (btn == null) btn = slotTransform.gameObject.AddComponent<Button>();
 
-        bool canInteract = (ability != null);
-        btn.interactable = canInteract;
+        // 只要有技能，Button 就是 interactable 的（这样才能触发 PointerEnter）
+        // 但点击逻辑在 Listener 里控制
+        bool hasSkill = (ability != null);
+        btn.interactable = hasSkill;
 
         var colors = btn.colors;
         colors.disabledColor = Color.white;
@@ -244,22 +277,21 @@ public class SkillBarPopulator : MonoBehaviour
         ApplyAnimationTriggers(btn, _isLocked);
 
         btn.onClick.RemoveAllListeners();
-        if (canInteract && !_isLocked)
+        if (hasSkill && !_isLocked)
         {
             btn.onClick.AddListener(() => { OnSkillClicked?.Invoke(index); });
         }
 
-        // ⭐ 更新 Tracery (使用新的 itemInner 引用)
+        // ⭐⭐⭐ 放在最后：更新 Tracery ⭐⭐⭐
         UpdateTracery(itemInner, ability, typeName);
     }
 
-    // === 修改：Tracery 逻辑现在接收 Transform itemInner ===
+    // === Tracery 逻辑 ===
     void UpdateTracery(Transform itemInner, Ability ability, string typeName)
     {
         if (itemInner == null) return;
-
         Transform traceryRoot = itemInner.Find("SPR_Tracery");
-        if (traceryRoot == null) return;
+        if (traceryRoot == null) return; // 如果找不到节点，直接返回，不报错
 
         Image traceryImg = traceryRoot.GetComponent<Image>();
         if (traceryImg == null) return;
@@ -271,7 +303,7 @@ public class SkillBarPopulator : MonoBehaviour
         }
 
         traceryImg.enabled = true;
-        Sprite targetSprite = traceryMixed; // Default
+        Sprite targetSprite = traceryMixed; // 默认
 
         if (_isLocked)
         {
@@ -384,7 +416,7 @@ public class SkillBarPopulator : MonoBehaviour
             if (gPhy) gPhy.gameObject.SetActive(false);
             if (gMag) gMag.gameObject.SetActive(false);
             if (gMix) gMix.gameObject.SetActive(false);
-            if (gEnemy && gEnemy.gameObject) gEnemy.gameObject.SetActive(false);
+            if (gEnemy) gEnemy.gameObject.SetActive(false);
             return;
         }
 

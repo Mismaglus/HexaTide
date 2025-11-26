@@ -15,8 +15,8 @@ namespace Game.UI
         [Header("Root References")]
         [SerializeField] private GameObject contentRoot; // 指向 "Content" 或整个物体
         [SerializeField] private RectTransform mainRect; // 指向 HUD_SkillHover 自身的 RectTransform
-        [Header("Background Section")]
 
+        [Header("Background Section")]
         public Image backgroundTracery;
 
         [Header("Icon Section")]
@@ -52,18 +52,25 @@ namespace Game.UI
         public Sprite traceryMixed;
         public Sprite traceryEnemy;
 
-        [Header("Colors")]
+        [Header("Colors (RGB Only)")]
         public Color enemyTint = new Color(1f, 0.85f, 0.85f, 1f);
-        public Color enemyGlow = new Color(0.8f, 0.0f, 0.0f, 0f);
 
-        // 友军颜色配置
+        // Glow 颜色 (Alpha 将由下方的 Alpha Settings 覆盖)
+        public Color enemyGlow = new Color(0.8f, 0.0f, 0.0f);
+        public Color phyGlow = new Color32(0xD9, 0xD3, 0xF3, 0xFF);
+        public Color magGlow = new Color32(0x73, 0xB6, 0xFF, 0xFF);
+        public Color mixGlow = new Color32(0xE7, 0xF2, 0xFF, 0xFF);
+
+        // Icon Tint 颜色
         public Color phyTint = new Color32(0xE8, 0xE3, 0xF7, 0xFF);
         public Color magTint = new Color32(0xEE, 0xF3, 0xFF, 0xFF);
         public Color mixTint = new Color32(0xE7, 0xF2, 0xFF, 0xFF);
 
-        public Color phyGlow = new Color32(0xD9, 0xD3, 0xF3, 0xFF);
-        public Color magGlow = new Color32(0x73, 0xB6, 0xFF, 0xFF);
-        public Color mixGlow = new Color32(0xE7, 0xF2, 0xFF, 0xFF);
+        [Header("Glow Alpha Settings")]
+        [Range(0f, 1f)] public float alphaPhysical = 0.10f;
+        [Range(0f, 1f)] public float alphaMagic = 0.12f;
+        [Range(0f, 1f)] public float alphaMixed = 0.11f;
+        [Range(0f, 1f)] public float alphaEnemy = 0.0f; // 默认敌方无高光
 
         // Hex Colors for Text
         const string COL_AP = "#8372AB";
@@ -129,13 +136,16 @@ namespace Game.UI
             bool isPhy = typeName.Contains("phys");
             bool isMag = typeName.Contains("magic") || typeName.Contains("magical");
 
-            // Colors & Tracery
+            // Colors & Tracery & Glow Alpha
             if (isEnemy)
             {
                 iconImage.color = enemyTint;
-                iconGlow.color = enemyGlow;
-                if (iconTracery) iconTracery.sprite = traceryEnemy;
-                if (backgroundTracery) backgroundTracery.sprite = traceryEnemy;
+                // 设置 Alpha
+                iconGlow.color = GetColorWithAlpha(enemyGlow, alphaEnemy);
+
+                if (iconTracery) iconTracery.sprite = traceryEnemy ?? traceryMixed; // Fallback to mixed if enemy tracery missing
+                if (backgroundTracery) backgroundTracery.sprite = traceryEnemy ?? traceryMixed;
+
                 ToggleGems(false, false, false, true);
             }
             else
@@ -143,28 +153,42 @@ namespace Game.UI
                 if (isPhy)
                 {
                     iconImage.color = phyTint;
-                    iconGlow.color = phyGlow;
+                    // 设置 Alpha
+                    iconGlow.color = GetColorWithAlpha(phyGlow, alphaPhysical);
+
                     if (iconTracery) iconTracery.sprite = traceryPhysical;
                     if (backgroundTracery) backgroundTracery.sprite = traceryPhysical;
+
                     ToggleGems(true, false, false, false);
                 }
                 else if (isMag)
                 {
                     iconImage.color = magTint;
-                    iconGlow.color = magGlow;
+                    // 设置 Alpha
+                    iconGlow.color = GetColorWithAlpha(magGlow, alphaMagic);
+
                     if (iconTracery) iconTracery.sprite = traceryMagic;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMagic;
+
                     ToggleGems(false, true, false, false);
                 }
                 else
                 {
                     iconImage.color = mixTint;
-                    iconGlow.color = mixGlow;
+                    // 设置 Alpha
+                    iconGlow.color = GetColorWithAlpha(mixGlow, alphaMixed);
+
                     if (iconTracery) iconTracery.sprite = traceryMixed;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMixed;
+
                     ToggleGems(false, false, true, false);
                 }
             }
+        }
+
+        Color GetColorWithAlpha(Color color, float alpha)
+        {
+            return new Color(color.r, color.g, color.b, alpha);
         }
 
         void ToggleGems(bool phy, bool mag, bool mix, bool enemy)
@@ -271,17 +295,11 @@ namespace Game.UI
 
         void UpdateAvailability(Ability ability, BattleUnit caster)
         {
-            // 简单的可用性逻辑，可根据 BattleUnit 的状态扩展
-            // 这里假设 Ability 有 CooldownTurns 字段，但在实际运行时可能需要一个 RuntimeAbility 类来记录当前 CD
-            // 由于 Ability 是 SO，我们这里仅显示静态规则，或者如果你有 Runtime 状态，请传入
-
-            // 这里暂时显示静态规则
+            // 简单的可用性逻辑
             if (ability.cooldownTurns > 0)
                 labelAvailability.text = $"Cooldown: {ability.cooldownTurns} Turns";
             else
                 labelAvailability.text = "Always Available";
-
-            // 如果你能获取到动态 CD (比如从 BattleUnit 的冷却管理器中)，可以在这里覆盖
         }
 
         // Helper copied from Populator

@@ -1,20 +1,29 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Battle;
 using Game.Battle.Status;
 using Game.Units;
+
 namespace Game.UI
 {
     public class UnitStatusPanelUI : MonoBehaviour
     {
         [Header("Prefabs")]
+        [Tooltip("背景是绿色的那个 Prefab")]
         public GameObject buffPrefab;
+
+        [Tooltip("背景是红色的那个 Prefab")]
         public GameObject debuffPrefab;
 
         [Header("Container")]
-        public Transform iconContainer; // 确保这个物体上有 HorizontalLayoutGroup
+        [Tooltip("图标生成的父节点 (通常就是挂此脚本的物体)")]
+        public Transform iconContainer;
 
         private UnitStatusController _currentStatusCtrl;
+
+        void Awake()
+        {
+            if (iconContainer == null) iconContainer = transform;
+        }
 
         // 由 UnitFrameUI 调用
         public void Bind(Unit unit)
@@ -26,7 +35,7 @@ namespace Game.UI
                 _currentStatusCtrl = null;
             }
 
-            // 2. 绑定新的
+            // 2. 绑定新单位
             if (unit != null)
             {
                 _currentStatusCtrl = unit.GetComponent<UnitStatusController>();
@@ -36,7 +45,7 @@ namespace Game.UI
                 }
             }
 
-            // 3. 立即刷新
+            // 3. 立即刷新一次
             Refresh();
         }
 
@@ -48,7 +57,7 @@ namespace Game.UI
 
         void Refresh()
         {
-            // 清空旧图标
+            // A. 清空当前显示的图标
             foreach (Transform child in iconContainer)
             {
                 Destroy(child.gameObject);
@@ -56,16 +65,20 @@ namespace Game.UI
 
             if (_currentStatusCtrl == null) return;
 
-            // 生成新图标
+            // B. 遍历单位身上的所有状态并生成图标
             foreach (var status in _currentStatusCtrl.activeStatuses)
             {
-                GameObject prefab = (status.Definition.type == StatusType.Buff) ? buffPrefab : debuffPrefab;
+                // 根据类型决定用哪个 Prefab
+                GameObject prefabToUse = (status.Definition.type == StatusType.Buff) ? buffPrefab : debuffPrefab;
 
-                // 如果没分那么细，就只用 buffPrefab
-                if (prefab == null) prefab = buffPrefab;
-                if (prefab == null) continue;
+                // 兜底：如果没分配 Debuff Prefab，全用 Buff 样式
+                if (prefabToUse == null) prefabToUse = buffPrefab;
+                if (prefabToUse == null) continue;
 
-                var go = Instantiate(prefab, iconContainer);
+                // 实例化
+                var go = Instantiate(prefabToUse, iconContainer);
+
+                // 初始化数据
                 var ui = go.GetComponent<StatusIconUI>();
                 if (ui != null)
                 {

@@ -7,52 +7,53 @@ namespace Game.UI
 {
     public class StatusIconUI : MonoBehaviour
     {
-        [Header("References (Auto-found if empty)")]
+        [Header("UI References")]
+        // 你可以在 Inspector 里拖进去，也可以留空让代码自动找
         public Image iconImage;
-        public TMP_Text labelDuration; // 对应 Label_RemainingTurn
+        public TMP_Text labelDuration;
 
         public void Initialize(RuntimeStatus status)
         {
-            // 1. 自动查找引用 (如果你不想手动拖拽)
+            if (status == null || status.Definition == null) return;
+
+            // 1. 自动查找组件 (匹配你的 Prefab 结构)
             if (iconImage == null)
                 iconImage = transform.Find("Icon/ICON")?.GetComponent<Image>();
 
             if (labelDuration == null)
                 labelDuration = transform.Find("Label_RemainingTurn")?.GetComponent<TMP_Text>();
 
-            if (status == null || status.Definition == null) return;
-
-            // 2. 设置图标
+            // 2. 更新图标 (核心需求：从 Asset 读取 Icon)
             if (iconImage != null)
             {
                 iconImage.sprite = status.Definition.icon;
-                // 如果你的图标是白色的，可以用 effectColor 染色
-                // iconImage.color = status.Definition.effectColor; 
+
+                // 可选：如果你的图标是白模，可以使用配置的颜色染色
+                // iconImage.color = status.Definition.effectColor;
             }
 
-            // 3. 设置文本 (优先显示层数，如果层数是1则显示持续时间，或者两者结合)
+            // 3. 更新文字 (层数 vs 持续时间)
             if (labelDuration != null)
             {
-                // 逻辑 A: 夜烬/星蚀类 (层数是核心) -> 显示层数
-                // 逻辑 B: 普通 Buff (时间是核心) -> 显示时间
-
-                // 这里我写一个通用的：
-                // 如果层数 > 1，显示层数 (x5)
-                // 否则显示持续时间 (3)
-                // 如果是永久，显示 ∞
-
                 string text = "";
+
+                // 逻辑：优先显示层数 (如 x5)，如果是 1 层则显示持续回合 (3)
+                // 你可以根据需求修改这个显示逻辑
                 if (status.Stacks > 1)
                 {
-                    text = $"x{status.Stacks}";
+                    text = $"{status.Stacks}"; // 或者 "x" + status.Stacks
                 }
                 else
                 {
-                    if (status.Definition.isPermanent) text = "∞";
-                    else text = status.DurationLeft.ToString();
+                    if (status.Definition.isPermanent)
+                        text = ""; // 永久状态不显示数字，或者显示 "∞"
+                    else
+                        text = status.DurationLeft.ToString();
                 }
 
                 labelDuration.text = text;
+                // 如果没字就隐藏文本框，保持整洁
+                labelDuration.gameObject.SetActive(!string.IsNullOrEmpty(text));
             }
         }
     }

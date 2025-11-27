@@ -6,14 +6,14 @@ using Game.UI;
 
 public class DebugStatusTester : MonoBehaviour
 {
-    [Header("Drag your Status Assets here")]
-    public StatusDefinition stellarErosion; // 按 1
-    public StatusDefinition lunarScar;      // 按 2
-    public StatusDefinition nightCinders;   // 按 3
+    [Header("Status Assets")]
+    public StatusDefinition stellarErosion; // Key: 1
+    public StatusDefinition lunarScar;      // Key: 2
+    public StatusDefinition nightCinders;   // Key: 3
 
-    [Header("Settings")]
-    [Tooltip("每次按键施加几层状态？(默认1，可以在运行时修改测试爆发)")]
-    [Min(1)] public int stacksToApply = 1; // ⭐ 新增：层数控制
+    [Header("Debug Settings")]
+    [Tooltip("按数字键时，一次施加几层状态？")]
+    [Min(1)] public int stacksToApply = 1; // ⭐ 这里就是你要的设置
 
     [Header("System Refs")]
     public SelectionManager selectionManager;
@@ -29,12 +29,15 @@ public class DebugStatusTester : MonoBehaviour
         var kb = Keyboard.current;
         if (kb == null) return;
 
-        // 按 1/2/3 施加对应状态 (带指定层数)
+        // 施加状态 (带层数)
         if (kb.digit1Key.wasPressedThisFrame) ApplyToSelection(stellarErosion);
         if (kb.digit2Key.wasPressedThisFrame) ApplyToSelection(lunarScar);
         if (kb.digit3Key.wasPressedThisFrame) ApplyToSelection(nightCinders);
 
-        // 按 0 强制结算回合结束 (触发 DoT)
+        // ⭐ 按 9：强制触发【回合开始】逻辑 -> 测试 星蚀 & 月痕
+        if (kb.digit9Key.wasPressedThisFrame) ForceStartTurn();
+
+        // ⭐ 按 0：强制触发【回合结束】逻辑 -> 测试 夜烬
         if (kb.digit0Key.wasPressedThisFrame) ForceEndTurn();
     }
 
@@ -45,38 +48,40 @@ public class DebugStatusTester : MonoBehaviour
         var unit = selectionManager.SelectedUnit;
         if (unit == null)
         {
-            Debug.LogWarning("先选中一个单位！");
+            Debug.LogWarning("请先选中一个单位！");
             return;
         }
 
         var battleUnit = unit.GetComponent<BattleUnit>();
-
-        if (battleUnit != null)
+        if (battleUnit != null && battleUnit.Status != null)
         {
-            if (battleUnit.Status != null)
-            {
-                // ⭐ 修改：传入 stacksToApply 参数
-                battleUnit.Status.ApplyStatus(def, battleUnit, stacksToApply);
-                Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {stacksToApply} 层 {def.name}</color>");
-            }
-            else
-            {
-                Debug.LogError($"[DEBUG] {unit.name} 缺少 UnitStatusController 组件！请在 Prefab 上添加。");
-            }
+            // 传入 stacksToApply
+            battleUnit.Status.ApplyStatus(def, battleUnit, stacksToApply);
+            Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {stacksToApply} 层 {def.name}</color>");
+        }
+        else
+        {
+            Debug.LogError($"[DEBUG] 单位 {unit.name} 缺少 BattleUnit 或 UnitStatusController 组件！");
+        }
+    }
+
+    void ForceStartTurn()
+    {
+        var unit = selectionManager.SelectedUnit;
+        if (unit?.GetComponent<BattleUnit>() is BattleUnit bu)
+        {
+            Debug.Log($"<color=green>[DEBUG] 强制触发 {unit.name} 的 OnTurnStart (星蚀/月痕)...</color>");
+            bu.OnTurnStart();
         }
     }
 
     void ForceEndTurn()
     {
         var unit = selectionManager.SelectedUnit;
-        if (unit != null)
+        if (unit?.GetComponent<BattleUnit>() is BattleUnit bu)
         {
-            var bu = unit.GetComponent<BattleUnit>();
-            if (bu)
-            {
-                Debug.Log($"<color=cyan>[DEBUG] 强制结算 {unit.name} 的回合结束事件...</color>");
-                bu.OnTurnEnd();
-            }
+            Debug.Log($"<color=red>[DEBUG] 强制触发 {unit.name} 的 OnTurnEnd (夜烬)...</color>");
+            bu.OnTurnEnd();
         }
     }
 }

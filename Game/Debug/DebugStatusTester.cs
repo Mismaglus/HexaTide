@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.InputSystem; // ⭐ 必须引用这个命名空间
+using UnityEngine.InputSystem;
 using Game.Battle;
 using Game.Battle.Status;
 using Game.UI;
@@ -10,6 +10,10 @@ public class DebugStatusTester : MonoBehaviour
     public StatusDefinition stellarErosion; // 按 1
     public StatusDefinition lunarScar;      // 按 2
     public StatusDefinition nightCinders;   // 按 3
+
+    [Header("Settings")]
+    [Tooltip("每次按键施加几层状态？(默认1，可以在运行时修改测试爆发)")]
+    [Min(1)] public int stacksToApply = 1; // ⭐ 新增：层数控制
 
     [Header("System Refs")]
     public SelectionManager selectionManager;
@@ -22,17 +26,15 @@ public class DebugStatusTester : MonoBehaviour
 
     void Update()
     {
-        // ⭐ 获取当前键盘设备，防止为空报错
         var kb = Keyboard.current;
         if (kb == null) return;
 
-        // ⭐ 使用新输入系统的 API: wasPressedThisFrame
-        // 注意：Key.1 是无效的变量名，新系统用 digit1Key, digit2Key 等
+        // 按 1/2/3 施加对应状态 (带指定层数)
         if (kb.digit1Key.wasPressedThisFrame) ApplyToSelection(stellarErosion);
         if (kb.digit2Key.wasPressedThisFrame) ApplyToSelection(lunarScar);
         if (kb.digit3Key.wasPressedThisFrame) ApplyToSelection(nightCinders);
 
-        // 按 0 结束当前单位的回合
+        // 按 0 强制结算回合结束 (触发 DoT)
         if (kb.digit0Key.wasPressedThisFrame) ForceEndTurn();
     }
 
@@ -47,15 +49,15 @@ public class DebugStatusTester : MonoBehaviour
             return;
         }
 
-        // 注意：这里获取的是 BattleUnit，确保你的 Unit Prefab 上挂载了 BattleUnit 和 UnitStatusController
         var battleUnit = unit.GetComponent<BattleUnit>();
 
         if (battleUnit != null)
         {
             if (battleUnit.Status != null)
             {
-                battleUnit.Status.ApplyStatus(def, battleUnit);
-                Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {def.name}</color>");
+                // ⭐ 修改：传入 stacksToApply 参数
+                battleUnit.Status.ApplyStatus(def, battleUnit, stacksToApply);
+                Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {stacksToApply} 层 {def.name}</color>");
             }
             else
             {
@@ -73,7 +75,7 @@ public class DebugStatusTester : MonoBehaviour
             if (bu)
             {
                 Debug.Log($"<color=cyan>[DEBUG] 强制结算 {unit.name} 的回合结束事件...</color>");
-                bu.OnTurnEnd(); // 手动触发 Status 结算
+                bu.OnTurnEnd();
             }
         }
     }

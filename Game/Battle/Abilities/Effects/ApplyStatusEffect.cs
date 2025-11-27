@@ -1,7 +1,8 @@
+// Scripts/Game/Battle/Abilities/Effects/ApplyStatusEffect.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Battle.Status; // 引用 Status 系统
+using Game.Battle.Status;
 using Core.Hex;
 
 namespace Game.Battle.Abilities.Effects
@@ -11,6 +12,10 @@ namespace Game.Battle.Abilities.Effects
     {
         [Header("Status Settings")]
         public StatusDefinition statusDefinition;
+
+        // ⭐ 新增：层数配置
+        [Tooltip("一次施加几层？(默认1)")]
+        [Min(1)] public int stacks = 1;
 
         [Tooltip("应用给谁？True=给自己(Buff)，False=给目标(Debuff)")]
         public bool applyToSelf = false;
@@ -22,7 +27,6 @@ namespace Game.Battle.Abilities.Effects
         {
             if (statusDefinition == null) yield break;
 
-            // 1. 确定目标集合
             List<BattleUnit> targets = new List<BattleUnit>();
 
             if (applyToSelf)
@@ -31,8 +35,6 @@ namespace Game.Battle.Abilities.Effects
             }
             else
             {
-                // 获取技能选中的所有目标
-                // 注意：这里复用了 TargetingResolver 的逻辑，确保范围正确
                 HexCoords origin = ctx.Origin;
                 if (ctx.TargetTiles.Count > 0) origin = ctx.TargetTiles[0];
                 else if (ctx.TargetUnits.Count > 0) origin = ctx.TargetUnits[0].UnitRef.Coords;
@@ -40,29 +42,27 @@ namespace Game.Battle.Abilities.Effects
                 targets = TargetingResolver.GatherTargets(caster, origin, ability);
             }
 
-            // 2. 施加状态
             foreach (var target in targets)
             {
                 if (target == null) continue;
-
-                // 随机判定
                 if (Random.value > chance) continue;
 
                 if (target.Status)
                 {
-                    target.Status.ApplyStatus(statusDefinition, caster);
-                    Debug.Log($"[Effect] Applied {statusDefinition.statusID} to {target.name}");
+                    // ⭐ 传入配置的层数
+                    target.Status.ApplyStatus(statusDefinition, caster, stacks);
+                    Debug.Log($"[Effect] Applied {stacks}x {statusDefinition.statusID} to {target.name}");
                 }
             }
 
-            yield break; // 这里的 Apply 是瞬间的，不需要等待
+            yield break;
         }
 
         public override string GetDescription(BattleUnit caster)
         {
             string targetStr = applyToSelf ? "Self" : "Target";
-            // 简单描述，你可以根据 LocalizationManager 优化
-            return $"Apply {statusDefinition.LocalizedName} to {targetStr}.";
+            string stackStr = stacks > 1 ? $"{stacks} stacks of " : "";
+            return $"Apply {stackStr}{statusDefinition.LocalizedName} to {targetStr}.";
         }
     }
 }

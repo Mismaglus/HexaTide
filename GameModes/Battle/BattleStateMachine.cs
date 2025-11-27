@@ -16,7 +16,6 @@ namespace Game.Battle
     /// </summary>
     public class BattleStateMachine : MonoBehaviour
     {
-        // ⭐ 单例模式，方便 BattleUnit 访问
         public static BattleStateMachine Instance { get; private set; }
 
         [Header("References")]
@@ -37,7 +36,6 @@ namespace Game.Battle
         readonly List<BattleUnit> _playerUnits = new();
         readonly List<BattleUnit> _enemyUnits = new();
 
-        // Actor 列表用于回合循环
         readonly List<ITurnActor> _playerActors = new();
         readonly List<ITurnActor> _enemyActors = new();
 
@@ -46,7 +44,7 @@ namespace Game.Battle
 
         void Awake()
         {
-            Instance = this; // 赋值单例
+            Instance = this;
 
             if (rules == null)
                 rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
@@ -86,6 +84,7 @@ namespace Game.Battle
                 else _enemyUnits.Add(unit);
             }
 
+            // Sort by InstanceID ensures deterministic order if positions are same (optional)
             _playerUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
             _enemyUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
 
@@ -114,16 +113,13 @@ namespace Game.Battle
             }
         }
 
-        // ⭐⭐⭐ 新增：处理单位死亡 ⭐⭐⭐
         public void OnUnitDied(BattleUnit unit)
         {
             if (_isBattleEnded) return;
 
-            // 1. 从单位列表中移除
             if (unit.isPlayer) _playerUnits.Remove(unit);
             else _enemyUnits.Remove(unit);
 
-            // 2. 从 Actor 列表中移除 (防止轮到死人行动)
             var actor = unit.GetComponent<ITurnActor>();
             if (actor != null)
             {
@@ -131,11 +127,9 @@ namespace Game.Battle
                 else _enemyActors.Remove(actor);
             }
 
-            // 3. 检查胜负
             CheckBattleOutcome();
         }
 
-        // ⭐⭐⭐ 新增：胜负判定 ⭐⭐⭐
         void CheckBattleOutcome()
         {
             if (_playerUnits.Count == 0)
@@ -155,19 +149,16 @@ namespace Game.Battle
 
             if (playerWon)
             {
-                Debug.Log("🏆 VICTORY! All enemies defeated.");
+                Debug.Log("🏆 VICTORY!");
                 OnVictory?.Invoke();
-                // TODO: Show Victory UI
             }
             else
             {
-                Debug.Log("☠️ DEFEAT! All allies fallen.");
+                Debug.Log("☠️ DEFEAT!");
                 OnDefeat?.Invoke();
-                // TODO: Show Game Over UI
             }
         }
 
-        // ... (Roster Accessors) ...
         public IReadOnlyList<BattleUnit> PlayerUnits => _playerUnits;
         public IReadOnlyList<BattleUnit> EnemyUnits => _enemyUnits;
 
@@ -177,28 +168,38 @@ namespace Game.Battle
             BeginTurn(firstSide, notifyActors: true);
         }
 
+        // === 玩家点击结束回合 ===
         public void EndTurnRequest()
         {
             if (_isBattleEnded) return;
             if (CurrentTurn != TurnSide.Player) return;
             if (_enemyTurnRoutine != null) return;
+
+            // ⭐ 1. 结算玩家回合结束的效果 (Night Cinders 触发点)
+            EndCurrentTurn(TurnSide.Player);
+
+            // 2. 启动敌人回合
             _enemyTurnRoutine = StartCoroutine(RunEnemyTurnRoutine());
         }
 
         IEnumerator RunEnemyTurnRoutine()
         {
+            // 3. 开启敌人回合 (Stellar Erosion / Lunar Scar 触发点)
             BeginTurn(TurnSide.Enemy, notifyActors: true);
 
-            // 拷贝一份列表防止在遍历时修改 (虽然 OnUnitDied 处理了，但安全起见)
             var actors = new List<ITurnActor>(_enemyActors);
             foreach (var actor in actors)
             {
-                if (actor == null || (actor is MonoBehaviour mb && mb == null)) continue; // Skip dead
+                if (actor == null || (actor is MonoBehaviour mb && mb == null)) continue;
                 yield return actor.TakeTurn();
 
-                if (_isBattleEnded) yield break; // 战斗结束立即停止
+                if (_isBattleEnded) yield break;
             }
 
+            // ⭐ 4. 结算敌人回合结束的效果
+            EndCurrentTurn(TurnSide.Enemy);
+
+            // 5. 回到玩家回合
             BeginTurn(TurnSide.Player, notifyActors: true);
             _enemyTurnRoutine = null;
         }
@@ -207,12 +208,14 @@ namespace Game.Battle
         {
             if (_isBattleEnded) return;
 
-            // 每次回合开始前稍微清理一下空引用，以防万一
             Cleanup();
             CurrentTurn = side;
 
+            // 重置资源，并触发 OnTurnStart (Dot 伤害)
             foreach (var unit in GetUnitsFor(side))
-                if (unit) unit.ResetTurnResources();
+            {
+                if (unit) unit.OnTurnStart();
+            }
 
             if (notifyActors)
             {
@@ -224,6 +227,16 @@ namespace Game.Battle
 
             OnTurnChanged?.Invoke(CurrentTurn);
             Debug.Log($"⚡ Turn Start: {side}");
+        }
+
+        // ⭐⭐⭐ 新增：回合结束结算逻辑 ⭐⭐⭐
+        void EndCurrentTurn(TurnSide side)
+        {
+            var units = GetUnitsFor(side);
+            foreach (var u in units)
+            {
+                if (u != null) u.OnTurnEnd(); // 触发 Status.OnTurnEnd (如夜烬扣血)
+            }
         }
 
         void Cleanup()

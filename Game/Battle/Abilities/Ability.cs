@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Game.Units;
-using Game.Localization; // 引用
+using Game.Localization;
 
 namespace Game.Battle.Abilities
 {
@@ -13,13 +13,12 @@ namespace Game.Battle.Abilities
     public abstract class Ability : ScriptableObject
     {
         [Header("Localization Identity")]
-        [Tooltip("技能的唯一ID，如 'SKILL_SLASH'。\n系统会自动查找 SKILL_SLASH_NAME, _DESC, _FLAVOR")]
         public string abilityID;
         public Sprite icon;
 
-        // ⭐ 获取本地化名称
         public string LocalizedName => LocalizationManager.Get($"{abilityID}_NAME");
         public string LocalizedFlavor => LocalizationManager.Get($"{abilityID}_FLAVOR");
+
         [Header("Costs")]
         public int apCost = 1;
         [Min(0)] public int mpCost = 0;
@@ -33,7 +32,17 @@ namespace Game.Battle.Abilities
 
         [Header("Area of Effect (AOE)")]
         public TargetShape shape = TargetShape.Single;
-        [Min(0)] public int aoeRadius = 0;
+
+        [Tooltip("-1 代表无限/全图")]
+        [Min(-1)] public int aoeRadius = 0;
+
+        // === ⭐ 新增：AOE 形状微调参数 ===
+        [Header("Shape Settings")]
+        [Tooltip("仅用于 Cone：扇形角度 (度)。标准战棋通常为 60 或 90。")]
+        [Range(30f, 180f)] public float coneAngle = 60f;
+
+        [Tooltip("仅用于 Line：直线宽度 (世界单位)。\n假设六边形半径为1，宽度 1.74 刚好覆盖一列。\n想要打到边缘，尝试设置 2.0 或更大。")]
+        [Min(0.1f)] public float lineWidth = 1.0f;
 
         [Header("Target Filtering")]
         public bool affectEnemies = true;
@@ -57,7 +66,6 @@ namespace Game.Battle.Abilities
         public string animStateTag = string.Empty;
         public float animWaitTimeout = 5f;
 
-        // 虚方法：检查是否可用
         public virtual bool CanUse(BattleUnit caster)
         {
             if (caster == null) return false;
@@ -66,10 +74,8 @@ namespace Game.Battle.Abilities
             return true;
         }
 
-        // 虚方法：检查目标是否有效
         public virtual bool IsValidTarget(BattleUnit caster, AbilityContext ctx) => ctx != null && ctx.HasAnyTarget;
 
-        // 虚方法：执行技能
         public virtual IEnumerator Execute(BattleUnit caster, AbilityContext ctx, AbilityRunner runner)
         {
             if (!CanUse(caster)) yield break;
@@ -80,8 +86,7 @@ namespace Game.Battle.Abilities
 
             yield return runner.PerformEffects(caster, this, ctx, effects);
         }
-        // ⭐ 获取本地化 Flavor Text
-        // 动态描述生成
+
         public string GetDynamicDescription(BattleUnit caster)
         {
             System.Text.StringBuilder sb = new System.Text.StringBuilder();

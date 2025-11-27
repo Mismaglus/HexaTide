@@ -4,6 +4,7 @@ using Game.Units;
 using Game.Core;
 using Game.Battle.Abilities;
 using Game.Grid;
+using Game.Battle.Status; // 引用 Status 命名空间
 
 namespace Game.Battle
 {
@@ -11,6 +12,8 @@ namespace Game.Battle
     [RequireComponent(typeof(Unit))]
     [RequireComponent(typeof(UnitMover))]
     [RequireComponent(typeof(UnitAttributes))]
+    // 推荐加上这个，保证 Status Controller 存在
+    [RequireComponent(typeof(UnitStatusController))]
     public class BattleUnit : MonoBehaviour
     {
         private Unit _unit;
@@ -22,7 +25,11 @@ namespace Game.Battle
         private UnitAttributes _attributes;
         public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
 
-        // ⭐ 新增：资源变化事件，供 UI 和 SelectionManager 监听
+        // === ⭐ 新增：状态控制器引用 ===
+        private UnitStatusController _statusController;
+        public UnitStatusController Status => _statusController ? _statusController : (_statusController = GetComponent<UnitStatusController>());
+
+        // 资源变化事件
         public event System.Action OnResourcesChanged;
 
         public int MaxAP => Attributes.Core.MaxAP;
@@ -54,12 +61,27 @@ namespace Game.Battle
             _attributes = GetComponent<UnitAttributes>();
             _hitReaction = GetComponent<UnitHitReaction>();
             _animator = GetComponentInChildren<Animator>();
+            _statusController = GetComponent<UnitStatusController>();
         }
 
-        // ⭐ 供外部（如 UnitMover）调用，手动触发刷新
         public void NotifyStateChange()
         {
             OnResourcesChanged?.Invoke();
+        }
+
+        // === ⭐ 生命周期钩子 (由 BattleStateMachine 调用) ===
+
+        // 1. 回合开始：重置资源 + 触发 Status (如 星蚀/月痕 扣血)
+        public void OnTurnStart()
+        {
+            ResetTurnResources();
+            if (Status) Status.OnTurnStart();
+        }
+
+        // 2. 回合结束：触发 Status (如 夜烬 扣血/衰减)
+        public void OnTurnEnd()
+        {
+            if (Status) Status.OnTurnEnd();
         }
 
         public void ResetTurnResources()
@@ -79,7 +101,6 @@ namespace Game.Battle
             if (cost <= 0) return true;
             if (CurAP < cost) return false;
             CurAP -= cost;
-            // Setter 自动触发 Notify
             return true;
         }
 
@@ -96,7 +117,6 @@ namespace Game.Battle
         {
             if (amount <= 0) return;
             CurAP += amount;
-            // Setter 自动触发 Notify
         }
 
         public void SetMaxAP(int value, bool refill = true)
@@ -106,14 +126,24 @@ namespace Game.Battle
             else NotifyStateChange();
         }
 
-        public void TakeDamage(int amount)
+        // === ⭐ 修改：受伤逻辑 (支持易伤/减伤) ===
+        public void TakeDamage(int amount, BattleUnit attacker = null)
         {
             if (Attributes.Core.HP <= 0) return;
+
+            // 1. 让状态系统修正伤害 (例如 Moon Scar 的易伤)
+            if (Status)
+            {
+                amount = Status.ApplyIncomingDamageModifiers(amount, attacker);
+            }
+
+            // 2. 扣血
             Attributes.Core.HP = Mathf.Max(0, Attributes.Core.HP - amount);
             NotifyStateChange();
 
             Debug.Log($"{name} took {amount} damage. HP: {Attributes.Core.HP}/{Attributes.Core.HPMax}");
 
+            // 3. 反应或死亡
             if (Attributes.Core.HP > 0)
             {
                 if (_hitReaction) _hitReaction.Play();
@@ -132,16 +162,13 @@ namespace Game.Battle
             var occupancy = FindFirstObjectByType<GridOccupancy>();
             if (occupancy) occupancy.Unregister(UnitRef);
 
-            var selection = FindFirstObjectByType<SelectionManager>();
-            if (selection && selection.SelectedUnit == UnitRef)
-            {
-                // SelectionManager 会处理空引用
-            }
-
+            // 通知状态机处理名单移除和胜负判定
             if (BattleStateMachine.Instance != null)
             {
                 BattleStateMachine.Instance.OnUnitDied(this);
             }
+
+            // 延迟销毁，留出播放死亡动画的时间
             Destroy(gameObject, 2.0f);
         }
     }

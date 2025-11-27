@@ -110,7 +110,6 @@ namespace Game.Battle
             BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
             return TargetingResolver.IsTargetTypeValid(_caster, targetBattleUnit, _currentAbility.targetType);
         }
-
         void HandleHoverChanged(HexCoords? coords)
         {
             if (!IsTargeting) return;
@@ -126,25 +125,26 @@ namespace Game.Battle
                 var cursorTex = isContentValid ? cursorTarget : cursorInvalid;
                 Cursor.SetCursor(cursorTex, cursorHotspot, CursorMode.Auto);
 
-                // === ⭐ 意图可视化 (核心修改) ===
                 if (isContentValid && outlineManager)
                 {
-                    // 1. 计算 AOE 区域
-                    var aoeTiles = TargetingResolver.GetAOETiles(hoverC, _currentAbility);
+                    // 1. 计算 AOE 区域 (使用新的 ThickLine / Variable Cone 算法)
+                    var aoeTiles = TargetingResolver.GetAOETiles(hoverC, _currentAbility, _caster.UnitRef.Coords);
 
-                    // 2. 计算世界坐标 (用于画箭头)
+                    // 2. 计算世界坐标
                     Vector3 startPos = _caster.transform.position;
                     Vector3 endPos = grid.GetTileWorldPosition(hoverC);
 
-                    // 3. 决定是否画箭头：如果是对自己放(Self)，通常不需要箭头
-                    bool showArrow = !hoverC.Equals(_caster.UnitRef.Coords);
+                    // 3. ⭐ 决定是否显示箭头
+                    // 逻辑：如果是 Line 或 Cone，不显示箭头 (因为地面已经有 Tint 了)
+                    // 如果是 Single/Disk/Ring，且不是对自己释放，则显示箭头
+                    bool isDirectionalAOE = _currentAbility.shape == TargetShape.Line || _currentAbility.shape == TargetShape.Cone;
+                    bool showArrow = !isDirectionalAOE && !hoverC.Equals(_caster.UnitRef.Coords);
 
-                    // 4. 提交给 Manager
+                    // 4. 显示意图
                     outlineManager.ShowPlayerIntent(startPos, endPos, aoeTiles, showArrow);
                 }
                 else if (outlineManager)
                 {
-                    // 无效目标，清除意图显示
                     outlineManager.ClearPlayerIntent();
                 }
             }
@@ -155,7 +155,6 @@ namespace Game.Battle
                 Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
             }
         }
-
         void HandleTileClicked(HexCoords coords)
         {
             if (!IsTargeting) return;

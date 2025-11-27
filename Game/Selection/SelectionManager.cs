@@ -209,8 +209,13 @@ namespace Game.Battle
             if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
             if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords)) { Debug.Log("目标太远"); return; }
 
-            // 移动开始，清除范围显示
-            if (outlineManager) outlineManager.ClearMovementRange();
+            // === ⭐ 修改开始：移动开始时隐藏视觉元素 ===
+            if (outlineManager)
+            {
+                outlineManager.ClearMovementRange();
+                // 隐藏敌方意图，减少视觉干扰
+                outlineManager.ToggleEnemyIntent(false);
+            }
 
             mover.FollowPath(path, onComplete: () =>
             {
@@ -219,6 +224,12 @@ namespace Game.Battle
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
                 RecalcRange();
+
+                // === ⭐ 修改：移动结束后恢复显示，此时 BattleIntentSystem 应该已经计算完新的危险区了 ===
+                if (outlineManager)
+                {
+                    outlineManager.ToggleEnemyIntent(true);
+                }
             });
         }
 

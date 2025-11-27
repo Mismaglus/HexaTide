@@ -1,14 +1,12 @@
-// Scripts/Game/Battle/Status/StatusDefinition.cs
 using UnityEngine;
 using Game.Localization;
-using Game.Battle; // 引用 BattleUnit
+using Game.Battle;
 
 namespace Game.Battle.Status
 {
     public enum StatusType { Buff, Debuff, Neutral }
     public enum StackBehavior { None, AddDuration, MaxDuration, IncreaseStacks }
 
-    // 基础类，允许继承
     [CreateAssetMenu(menuName = "HexBattle/Status/Definition (Basic)")]
     public class StatusDefinition : ScriptableObject
     {
@@ -26,26 +24,36 @@ namespace Game.Battle.Status
         public int maxStacks = 1;
         public StackBehavior stackBehavior = StackBehavior.MaxDuration;
 
+        [Header("Timing")]
+        [Tooltip("勾选：回合开始时扣除层数/时间（即时消耗）。\n不勾选：回合结束时扣除（延迟消耗）。")]
+        public bool decreaseStackAtStart = true; // ⭐ 新增开关
+
         [Header("Visuals")]
         public Color effectColor = Color.white;
         public GameObject vfxPrefab;
 
-        // === 核心逻辑钩子 (Virtual Methods) ===
+        // === 核心逻辑钩子 ===
 
-        // 1. 回合开始时 (星蚀 / 月痕 在这里触发)
-        public virtual void OnTurnStart(RuntimeStatus status, BattleUnit unit) { }
-
-        // 2. 回合结束时 (夜烬 在这里触发，普通 Buff 也就是在这里扣时间)
-        public virtual void OnTurnEnd(RuntimeStatus status, BattleUnit unit)
+        public virtual void OnTurnStart(RuntimeStatus status, BattleUnit unit)
         {
-            // 默认行为：如果是临时状态，回合结束扣时间
-            status.TickDuration();
+            // 默认逻辑：如果勾选了 Start 扣减，且不是永久状态，则扣时间
+            if (decreaseStackAtStart && !isPermanent)
+            {
+                status.TickDuration();
+            }
         }
 
-        // 3. 堆叠层数增加时 (比如再次施加)
+        public virtual void OnTurnEnd(RuntimeStatus status, BattleUnit unit)
+        {
+            // 默认逻辑：如果不勾选 Start 扣减，且不是永久状态，则在 End 扣时间
+            if (!decreaseStackAtStart && !isPermanent)
+            {
+                status.TickDuration();
+            }
+        }
+
         public virtual void OnStackAdded(RuntimeStatus status, int amount) { }
 
-        // 4. 受伤修正 (月痕的易伤逻辑在这里)
         public virtual int ModifyIncomingDamage(RuntimeStatus status, int rawDamage, BattleUnit attacker)
         {
             return rawDamage;

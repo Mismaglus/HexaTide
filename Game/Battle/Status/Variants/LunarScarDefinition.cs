@@ -1,4 +1,3 @@
-// Scripts/Game/Battle/Status/Variants/LunarScarDefinition.cs
 using UnityEngine;
 
 namespace Game.Battle.Status
@@ -12,27 +11,43 @@ namespace Game.Battle.Status
 
         public override void OnTurnStart(RuntimeStatus status, BattleUnit unit)
         {
+            // 1. 造成伤害
             int maxHP = unit.Attributes.Core.HPMax;
             int currentHP = unit.Attributes.Core.HP;
             int missingHP = maxHP - currentHP;
 
-            if (missingHP <= 0) return;
-
-            float pct = status.Stacks * percentMissingPerStack;
-            int damage = Mathf.FloorToInt(missingHP * pct);
-
-            if (damage < 1 && missingHP > 0) damage = 1; // 保底1点
-
-            if (damage > 0)
+            if (missingHP > 0)
             {
+                float pct = status.Stacks * percentMissingPerStack;
+                int damage = Mathf.FloorToInt(missingHP * pct);
+
+                if (damage < 1) damage = 1;
+
                 unit.TakeDamage(damage);
                 Debug.Log($"[Lunar] Scar dealt {damage} dmg ({pct:P0} of missing) to {unit.name}");
+            }
+
+            // 2. 减少层数 (根据配置)
+            if (decreaseStackAtStart)
+            {
+                status.Stacks--;
             }
         }
 
         public override void OnTurnEnd(RuntimeStatus status, BattleUnit unit)
         {
-            status.Stacks--;
+            // 减少层数 (根据配置)
+            if (!decreaseStackAtStart)
+            {
+                status.Stacks--;
+            }
+        }
+
+        // 易伤逻辑
+        public override int ModifyIncomingDamage(RuntimeStatus status, int rawDamage, BattleUnit attacker)
+        {
+            float vulnerability = 0.2f;
+            return Mathf.RoundToInt(rawDamage * (1 + vulnerability));
         }
     }
 }

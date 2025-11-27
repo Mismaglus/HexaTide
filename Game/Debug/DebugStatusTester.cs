@@ -1,7 +1,8 @@
 using UnityEngine;
+using UnityEngine.InputSystem; // ⭐ 必须引用这个命名空间
 using Game.Battle;
 using Game.Battle.Status;
-using Game.UI; // 引用 SkillBarController 所在的命名空间以便查找
+using Game.UI;
 
 public class DebugStatusTester : MonoBehaviour
 {
@@ -21,12 +22,18 @@ public class DebugStatusTester : MonoBehaviour
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Alpha1)) ApplyToSelection(stellarErosion);
-        if (Input.GetKeyDown(KeyCode.Alpha2)) ApplyToSelection(lunarScar);
-        if (Input.GetKeyDown(KeyCode.Alpha3)) ApplyToSelection(nightCinders);
+        // ⭐ 获取当前键盘设备，防止为空报错
+        var kb = Keyboard.current;
+        if (kb == null) return;
 
-        // 按 0 结束当前单位的回合（方便触发 夜烬 的结算）
-        if (Input.GetKeyDown(KeyCode.Alpha0)) ForceEndTurn();
+        // ⭐ 使用新输入系统的 API: wasPressedThisFrame
+        // 注意：Key.1 是无效的变量名，新系统用 digit1Key, digit2Key 等
+        if (kb.digit1Key.wasPressedThisFrame) ApplyToSelection(stellarErosion);
+        if (kb.digit2Key.wasPressedThisFrame) ApplyToSelection(lunarScar);
+        if (kb.digit3Key.wasPressedThisFrame) ApplyToSelection(nightCinders);
+
+        // 按 0 结束当前单位的回合
+        if (kb.digit0Key.wasPressedThisFrame) ForceEndTurn();
     }
 
     void ApplyToSelection(StatusDefinition def)
@@ -40,12 +47,20 @@ public class DebugStatusTester : MonoBehaviour
             return;
         }
 
+        // 注意：这里获取的是 BattleUnit，确保你的 Unit Prefab 上挂载了 BattleUnit 和 UnitStatusController
         var battleUnit = unit.GetComponent<BattleUnit>();
-        if (battleUnit && battleUnit.Status)
+
+        if (battleUnit != null)
         {
-            // 这里的 source 传自己，模拟自己给自己挂（或者你可以传 null）
-            battleUnit.Status.ApplyStatus(def, battleUnit);
-            Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {def.name}</color>");
+            if (battleUnit.Status != null)
+            {
+                battleUnit.Status.ApplyStatus(def, battleUnit);
+                Debug.Log($"<color=yellow>[DEBUG] 给 {unit.name} 挂上了 {def.name}</color>");
+            }
+            else
+            {
+                Debug.LogError($"[DEBUG] {unit.name} 缺少 UnitStatusController 组件！请在 Prefab 上添加。");
+            }
         }
     }
 

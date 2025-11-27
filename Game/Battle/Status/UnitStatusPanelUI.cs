@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Game.Battle;
 using Game.Battle.Status;
-
+using Game.Units;
 namespace Game.UI
 {
     public class UnitStatusPanelUI : MonoBehaviour

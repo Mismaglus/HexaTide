@@ -9,21 +9,19 @@ namespace Game.UI
 {
     public class UnitFrameUI : MonoBehaviour
     {
-        [Header("Portrait Section")]
+        [Header("Existing Sections...")]
         public Image portraitImage;
         public Slider hpSlider;
         public TMP_Text hpText;
-
-        [Header("Stats Section")]
         public GenericBarController apBarController;
         public GenericBarController mpBarController;
-
-        [Header("Movement Section")]
         public StrideVisualController strideController;
-
-        [Header("System")]
         public SelectionManager selectionManager;
         public GameObject contentRoot;
+
+        // === ⭐ 新增：状态栏引用 ===
+        [Header("Status Section")]
+        public UnitStatusPanelUI statusPanel;
 
         private Unit _currentUnit;
 
@@ -57,6 +55,13 @@ namespace Game.UI
             _currentUnit = unit;
             bool hasUnit = (unit != null);
             if (contentRoot != null) contentRoot.SetActive(hasUnit);
+
+            // === ⭐ 绑定状态栏 ===
+            if (statusPanel != null)
+            {
+                statusPanel.Bind(unit);
+            }
+
             if (!hasUnit) return;
 
             if (portraitImage != null) portraitImage.sprite = unit.portrait;
@@ -89,11 +94,11 @@ namespace Game.UI
                     apBarController.CurrentValue = attrs.Core.CurrentAP;
                 }
 
-                // ⭐ Stride (直接从 Attributes 读取)
+                // Stride
                 if (strideController != null)
                 {
                     int currentStride = attrs.Core.CurrentStride;
-                    int maxStride = attrs.Core.Stride; // 属性里的 Stride 就是 Max
+                    int maxStride = attrs.Core.Stride;
                     strideController.UpdateView(currentStride, maxStride);
                 }
             }

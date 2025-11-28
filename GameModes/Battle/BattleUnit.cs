@@ -154,6 +154,42 @@ namespace Game.Battle
             }
         }
 
+        // 在 BattleUnit.cs 中添加
+
+        // === 治疗逻辑 ===
+        public void Heal(int amount)
+        {
+            if (Attributes.Core.HP <= 0) return; // 尸体通常无法治疗，除非是复活技能(另作处理)
+            if (amount <= 0) return;
+
+            int current = Attributes.Core.HP;
+            int max = Attributes.Core.HPMax;
+
+            // 计算实际治疗量 (处理过量)
+            int actualHeal = amount;
+            if (current + actualHeal > max)
+            {
+                actualHeal = max - current;
+            }
+
+            // 应用治疗
+            Attributes.Core.HP += actualHeal;
+            NotifyStateChange();
+
+            // 简单的日志反馈
+            if (actualHeal < amount)
+            {
+                Debug.Log($"<color=green>{name} healed for {actualHeal} (Overheal: {amount - actualHeal}). HP: {Attributes.Core.HP}/{max}</color>");
+            }
+            else
+            {
+                Debug.Log($"<color=green>{name} healed for {actualHeal}. HP: {Attributes.Core.HP}/{max}</color>");
+            }
+
+            // TODO: 这里可以添加绿色飘字或者治疗特效播放
+            // if (_visualFeedback) _visualFeedback.PlayHeal(); 
+        }
+
         private void Die()
         {
             Debug.Log($"💀 {name} has DIED!");

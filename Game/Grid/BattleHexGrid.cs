@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Game.Grid;
+
 namespace Game.Battle
 {
     [ExecuteAlways]
@@ -24,18 +25,18 @@ namespace Game.Battle
             get => _recipe;
             private set => _recipe = value;
         }
-        [SerializeField] private bool _useRecipeBorderMode = true; // 勾上=跟随配方；关掉=用运行时覆盖
+        [SerializeField] private bool _useRecipeBorderMode = true;
         [SerializeField] private BorderMode _runtimeBorderMode = BorderMode.AllUnique;
-        private BorderMode _lastRuntimeMode;                      // 运行时变更检测
+        private BorderMode _lastRuntimeMode;
 
-        [SerializeField] private int _lastRecipeHash;                      // 配方哈希（运行时检测用）
+        [SerializeField] private int _lastRecipeHash;
 
         const string CHILD_PREFIX_TILES = "Hex_r";
-        const string CHILD_BORDERS = "GridBorders";
 
-        Material _sharedMat;   // 瓦片材质
-        Material _borderMat;   // 边线材质
+        Material _sharedMat;
+        Material _borderMat;
         bool _dirty;
+
         public IEnumerable<TileTag> EnumerateTiles()
         {
             return GetComponentsInChildren<TileTag>(true);
@@ -43,7 +44,7 @@ namespace Game.Battle
 
         void OnEnable() { _dirty = true; }
 #if UNITY_EDITOR
-        void OnValidate() { _dirty = true; }    // 这里只打标记
+        void OnValidate() { _dirty = true; }
 #endif
         void Update()
         {
@@ -66,8 +67,6 @@ namespace Game.Battle
             if (need) { _dirty = false; Rebuild(); }
         }
 
-
-
         void ClearChildren()
         {
             for (int i = transform.childCount - 1; i >= 0; i--)
@@ -86,7 +85,6 @@ namespace Game.Battle
         {
             if (!isActiveAndEnabled) return;
 
-            // 临时配方（展开就能跑）
             if (recipe == null)
             {
                 recipe = ScriptableObject.CreateInstance<GridRecipe>();
@@ -98,7 +96,6 @@ namespace Game.Battle
 
             ClearChildren();
 
-            // === 材质 ===
             if (recipe.tileMaterial != null) _sharedMat = recipe.tileMaterial;
             else if (_sharedMat == null)
             {
@@ -111,20 +108,16 @@ namespace Game.Battle
             {
                 var sh = Shader.Find("Universal Render Pipeline/Unlit");
                 _borderMat = new Material(sh);
-                _borderMat.SetFloat("_Surface", 1f); // Transparent
-                _borderMat.SetFloat("_ZWrite", 0f);  // Depth Off
-                _borderMat.SetFloat("_Cull", 0f);    // Double-sided
+                _borderMat.SetFloat("_Surface", 1f);
+                _borderMat.SetFloat("_ZWrite", 0f);
+                _borderMat.SetFloat("_Cull", 0f);
                 _borderMat.renderQueue = (int)RenderQueue.Transparent;
             }
 
-            // === 生成掩码（带空列/随机洞）===
             var mask = BuildMask(recipe);
-
-            // === 居中偏移（只看存在的格子）===
             var worldBounds = HexBorderMeshBuilder.ComputeWorldBounds(mask, recipe.outerRadius, recipe.useOddROffset);
             CenterOffset = new Vector3(worldBounds.center.x, 0f, worldBounds.center.z);
 
-            // === 铺瓦片（只放存在的格子）===
             for (int r = 0; r < recipe.height; r++)
             {
                 for (int q = 0; q < recipe.width; q++)
@@ -146,13 +139,16 @@ namespace Game.Battle
 
                     tile.BuildImmediate();
 
-                    var tag = go.AddComponent<Game.Common.TileTag>();
+                    var tag = go.AddComponent<TileTag>();
                     tag.Set(q, r);
 
+                    // ? 新增：添加 HexCell 数据组件
+                    var cell = go.AddComponent<HexCell>();
+                    // 简单示例：如果是边缘或者特定列，可以设为沼泽 (原型测试用)
+                    // if (Random.value < 0.1f) cell.terrainType = HexTerrainType.Swamp;
                 }
             }
 
-            // === 边线（唯一网格）===
             var mode = _useRecipeBorderMode ? recipe.borderMode : _runtimeBorderMode;
             if (mode != BorderMode.None)
             {
@@ -164,7 +160,7 @@ namespace Game.Battle
                 mr.sharedMaterial = _borderMat;
 
                 var mesh = HexBorderMeshBuilder.Build(
-                    /* HexMask */ mask,
+                    mask,
                     recipe.outerRadius, recipe.borderYOffset, recipe.thickness,
                     recipe.borderWidth, recipe.useOddROffset,
                     mode
@@ -178,13 +174,11 @@ namespace Game.Battle
             }
         }
 
-        // 生成掩码：默认全 True；可剔除整列或随机挖洞（用于章节地图原型）
         HexMask BuildMask(GridRecipe rcp)
         {
             int w = rcp.width, h = rcp.height;
             var mask = HexMask.Filled(w, h);
 
-            // 整列清空
             if (rcp.emptyColumns != null)
             {
                 foreach (var col in rcp.emptyColumns)
@@ -194,15 +188,12 @@ namespace Game.Battle
                 }
             }
 
-            // 随机挖洞（可选）
             if (rcp.enableRandomHoles && rcp.holeChance > 0f)
                 mask.RandomHoles(rcp.holeChance, rcp.randomSeed);
             Version++;
             return mask;
         }
 
-
-        // 运行期接口：外部脚本可切换边线模式
         public void SetBorderMode(BorderMode mode) { _runtimeBorderMode = mode; _dirty = true; }
 
         [ContextMenu("Rebuild Grid")]

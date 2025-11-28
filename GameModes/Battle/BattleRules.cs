@@ -7,17 +7,12 @@ using Game.Units;
 
 namespace Game.Battle
 {
-    /// <summary>
-    /// 战斗模式下的规则中心：阵营判断、可走判定、选择判定等。
-    /// 仅包含“规则”，不持有状态（占位表仍由 SelectionManager 维护）。
-    /// </summary>
     public class BattleRules : MonoBehaviour
     {
         [Header("References")]
         [Tooltip("任何实现了 IHexGridProvider 的网格组件（如 BattleHexGrid）")]
         [SerializeField] private MonoBehaviour gridComponent;
 
-        [Tooltip("占位/查询在这里做（若留空会自动查找场景中的 SelectionManager）")]
         [SerializeField] private SelectionManager selection;
         [SerializeField] private Game.Grid.GridOccupancy occupancy;
 
@@ -45,9 +40,18 @@ namespace Game.Battle
 
         public bool IsEnemy(ITurnActor actor) => !IsPlayer(actor);
 
+        // ? 新增：比较两个单位是否敌对
+        public bool IsEnemy(Unit a, Unit b)
+        {
+            if (a == null || b == null) return false;
+            var buA = a.GetComponent<BattleUnit>();
+            var buB = b.GetComponent<BattleUnit>();
+            if (buA == null || buB == null) return false; // 非战斗单位默认中立
+            return buA.isPlayer != buB.isPlayer;
+        }
+
         public bool CanSelect(Unit unit)
         {
-            // 仅允许选中我方单位
             if (unit == null) return false;
             return unit.TryGetComponent(out BattleUnit bu) && bu.isPlayer;
         }
@@ -57,9 +61,6 @@ namespace Game.Battle
         public bool Contains(HexCoords c)
         {
             if (grid == null) return false;
-
-            // 若你的网格类有 Contains(c)，可以换成它；
-            // 这里用 EnumerateTiles 做一个通用兜底。
             return grid.EnumerateTiles().Any(t => t != null && t.Coords.Equals(c));
         }
 
@@ -71,29 +72,24 @@ namespace Game.Battle
         public bool IsTileWalkable(HexCoords c)
         {
             // 战斗中：必须在网格内，且无人占用
+            // 注意：HexPathfinder 会使用更高级的 GetMoveCost 来判断地形和单位阻挡
             return Contains(c) && !IsOccupied(c);
         }
 
         public bool CanStep(Unit unit, HexCoords dst)
         {
             if (unit == null) return false;
-            if (unit.Coords.DistanceTo(dst) != 1) return false;     // 仅邻格
+            if (unit.Coords.DistanceTo(dst) != 1) return false;
             if (!IsTileWalkable(dst)) return false;
 
-            // ? 修复：检查移动力 (Stride)
-            // 现在数据归一化到了 UnitAttributes
             if (unit.TryGetComponent(out UnitAttributes attrs))
             {
                 return attrs.Core.CurrentStride > 0;
             }
 
-            return true; // 没挂 UnitAttributes 的特殊单位，规则放行
+            return true;
         }
 
-        /// <summary>
-        /// 返回单位在当前 Stride 下的可达邻格（一步）。
-        /// 以后扩展 A* 时可在这上面做多步寻路。
-        /// </summary>
         public IEnumerable<HexCoords> GetStepCandidates(Unit unit)
         {
             if (unit == null) yield break;

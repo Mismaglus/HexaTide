@@ -5,8 +5,8 @@ using Core.Hex;
 namespace Game.Common
 {
     /// <summary>
-    /// 增强版高亮器：支持瞄准模式下的智能颜色混合 (Impact > Range > Hover)。
-    /// 修复了 ApplyRange 状态切换不更新的 Bug。
+    /// 增强版高亮器：支持瞄准模式下的智能颜色混合。
+    /// 优先级：Player Impact (Cyan) > Selected > Enemy Danger (Red) > Hover > Move/Range
     /// </summary>
     [DisallowMultipleComponent]
     public class HexHighlighter : MonoBehaviour
@@ -19,23 +19,28 @@ namespace Game.Common
         public Color selectedColor = new Color(0.25f, 0.8f, 1.0f, 0.5f);   // 选中单位（蓝）
 
         [Header("Combat Colors")]
-        // ? 技能范围 (底色)
+        // 技能射程范围 (底色)
         public Color rangeColor = new Color(0.0f, 1.0f, 0.4f, 0.3f);
-        // ? 打击高亮 (鼠标指着有效目标时)
-        public Color impactColor = new Color(1.0f, 0.6f, 0.0f, 0.9f);
-        // ? 无效警告 (鼠标指在范围外时)
+
+        // ? 玩家预瞄 (Player Impact) - 既然你想要 Cyan，这里默认设为青色
+        public Color playerImpactColor = new Color(0f, 1f, 1f, 0.8f);
+
+        // ? 敌人威胁 (Enemy Danger) - 红色
+        public Color enemyDangerColor = new Color(1.0f, 0.2f, 0.2f, 0.6f);
+
+        // 无效/错误 (Invalid)
         public Color invalidColor = new Color(1.0f, 0.1f, 0.1f, 0.5f);
 
         [Header("Movement Colors")]
-        // ? 免费移动 (Stride) - 淡一点
         public Color moveFreeColor = new Color(0.0f, 1.0f, 0.4f, 0.15f);
-        // ? 付费移动 (AP) - 淡一点
         public Color moveCostColor = new Color(1.0f, 0.8f, 0.0f, 0.15f);
 
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
         [Range(0.1f, 4f)] public float selectedIntensity = 1.0f;
         [Range(0.1f, 4f)] public float rangeIntensity = 1.0f;
+        [Range(0.1f, 4f)] public float impactIntensity = 1.0f; // ? 新增 Impact 强度控制
+        [Range(0.1f, 4f)] public float dangerIntensity = 1.0f; // ? 新增 Danger 强度控制
 
         [Header("Material Compatibility")]
         public string[] colorPropertyNames = new[] { "_BaseColor", "_Color", "_Tint" };
@@ -48,10 +53,12 @@ namespace Game.Common
         // States
         HexCoords? _hover;
         HexCoords? _selected;
-        readonly HashSet<HexCoords> _range = new();   // 技能范围
-        readonly HashSet<HexCoords> _impact = new();  // 打击范围
-        readonly HashSet<HexCoords> _moveFree = new(); // 免费移动
-        readonly HashSet<HexCoords> _moveCost = new(); // 付费移动
+
+        readonly HashSet<HexCoords> _range = new();        // 玩家技能范围
+        readonly HashSet<HexCoords> _impact = new();       // 玩家AOE预瞄
+        readonly HashSet<HexCoords> _enemyDanger = new();  // ? 敌人AOE范围
+        readonly HashSet<HexCoords> _moveFree = new();     // 免费移动
+        readonly HashSet<HexCoords> _moveCost = new();     // 付费移动
 
         MaterialPropertyBlock _mpb;
         uint _lastGridVersion;
@@ -121,7 +128,6 @@ namespace Game.Common
             Repaint(_selected);
         }
 
-        // 用于技能范围 (SelectionManager 可能还会调这个)
         public void ApplyRange(IEnumerable<HexCoords> c)
         {
             var old = new HashSet<HexCoords>(_range);
@@ -132,32 +138,23 @@ namespace Game.Common
             foreach (var x in _range) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
-        // ??? 修复：移动范围应用逻辑 ???
         public void ApplyMoveRange(IEnumerable<HexCoords> free, IEnumerable<HexCoords> cost)
         {
-            // 1. 记录所有可能受影响的格子 (Old Union)
             var dirtyTiles = new HashSet<HexCoords>(_moveFree);
             dirtyTiles.UnionWith(_moveCost);
 
-            // 2. 更新数据
             _moveFree.Clear();
             _moveCost.Clear();
             if (free != null) foreach (var x in free) _moveFree.Add(x);
             if (cost != null) foreach (var x in cost) _moveCost.Add(x);
 
-            // 3. 把新涉及的格子也加入脏列表 (New Union)
             dirtyTiles.UnionWith(_moveFree);
             dirtyTiles.UnionWith(_moveCost);
 
-            // 4. 强制重绘所有脏格子
-            // 之前的逻辑只比较了 Diff，导致 A状态->B状态 的切换没刷新
-            // 现在只要涉及变动，全部重绘，Repaint 内部会根据最新集合决定颜色
-            foreach (var t in dirtyTiles)
-            {
-                Repaint(t.q, t.r);
-            }
+            foreach (var t in dirtyTiles) Repaint(t.q, t.r);
         }
 
+        // 玩家预瞄 (AOE)
         public void SetImpact(IEnumerable<HexCoords> c)
         {
             var old = new HashSet<HexCoords>(_impact);
@@ -168,6 +165,18 @@ namespace Game.Common
             foreach (var x in _impact) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
+        // ? 新增：设置敌人危险区域
+        public void SetEnemyDanger(IEnumerable<HexCoords> c)
+        {
+            var old = new HashSet<HexCoords>(_enemyDanger);
+            _enemyDanger.Clear();
+            if (c != null) foreach (var x in c) _enemyDanger.Add(x);
+
+            // 刷新旧的和新的区域
+            foreach (var x in old) if (!_enemyDanger.Contains(x)) Repaint(x.q, x.r);
+            foreach (var x in _enemyDanger) if (!old.Contains(x)) Repaint(x.q, x.r);
+        }
+
         public void ClearAll()
         {
             var t = new HashSet<HexCoords>();
@@ -175,11 +184,12 @@ namespace Game.Common
             if (_selected.HasValue) t.Add(_selected.Value);
             foreach (var x in _range) t.Add(x);
             foreach (var x in _impact) t.Add(x);
+            foreach (var x in _enemyDanger) t.Add(x); // Add Danger
             foreach (var x in _moveFree) t.Add(x);
             foreach (var x in _moveCost) t.Add(x);
 
             _hover = null; _selected = null;
-            _range.Clear(); _impact.Clear(); _moveFree.Clear(); _moveCost.Clear();
+            _range.Clear(); _impact.Clear(); _enemyDanger.Clear(); _moveFree.Clear(); _moveCost.Clear();
 
             foreach (var x in t) ClearPaint(x);
         }
@@ -195,6 +205,7 @@ namespace Game.Common
             if (_selected.HasValue) Repaint(_selected.Value.q, _selected.Value.r);
             foreach (var v in _range) Repaint(v.q, v.r);
             foreach (var v in _impact) Repaint(v.q, v.r);
+            foreach (var v in _enemyDanger) Repaint(v.q, v.r); // Repaint Danger
             foreach (var v in _moveFree) Repaint(v.q, v.r);
             foreach (var v in _moveCost) Repaint(v.q, v.r);
         }
@@ -209,16 +220,23 @@ namespace Game.Common
             bool isSelected = _selected.HasValue && _selected.Value.Equals(coord);
             bool inRange = _range.Contains(coord);
             bool inImpact = _impact.Contains(coord);
+            bool inDanger = _enemyDanger.Contains(coord); // ?
             bool inFree = _moveFree.Contains(coord);
             bool inCost = _moveCost.Contains(coord);
 
             Color finalColor = Color.clear;
             bool shouldPaint = false;
 
-            // 优先级：Impact > Selected > Hover > MoveCost > MoveFree > Range
+            // 优先级逻辑：
+            // 1. Impact (玩家瞄准)：最高优先级，我正在瞄准，我要看清楚覆盖了什么
+            // 2. Selected (玩家选中)：知道自己在哪
+            // 3. EnemyDanger (敌人威胁)：重要的警示信息
+            // 4. Hover (鼠标悬停)：交互反馈
+            // 5. Move/Range：底色信息
+
             if (inImpact)
             {
-                finalColor = impactColor;
+                finalColor = playerImpactColor * impactIntensity;
                 shouldPaint = true;
             }
             else if (isSelected)
@@ -226,9 +244,15 @@ namespace Game.Common
                 finalColor = selectedColor * selectedIntensity;
                 shouldPaint = true;
             }
+            else if (inDanger)
+            {
+                // ? 敌人威胁 (红色)
+                finalColor = enemyDangerColor * dangerIntensity;
+                shouldPaint = true;
+            }
             else if (isHover)
             {
-                // 瞄准模式下指在外面显示红，否则显示黄
+                // 如果在射程内但不在Impact内，显示普通Hover，否则如果是在瞄准状态但指歪了显示Invalid
                 if (_range.Count > 0)
                 {
                     finalColor = invalidColor;
@@ -242,19 +266,16 @@ namespace Game.Common
             }
             else if (inCost)
             {
-                // ? 付费区
                 finalColor = moveCostColor * rangeIntensity;
                 shouldPaint = true;
             }
             else if (inFree)
             {
-                // ? 免费区
                 finalColor = moveFreeColor * rangeIntensity;
                 shouldPaint = true;
             }
             else if (inRange)
             {
-                // 技能范围底色
                 finalColor = rangeColor * rangeIntensity;
                 shouldPaint = true;
             }
@@ -281,18 +302,6 @@ namespace Game.Common
         {
             if (_slots.TryGetValue((c.q, c.r), out var slot) && slot.mr)
                 slot.mr.SetPropertyBlock(null);
-        }
-
-        bool HasAnyState(HexCoords? c)
-        {
-            int q = c.Value.q; int r = c.Value.r;
-            var coord = new HexCoords(q, r);
-            return (_hover.HasValue && _hover.Value.Equals(coord)) ||
-                   (_selected.HasValue && _selected.Value.Equals(coord)) ||
-                   _range.Contains(coord) ||
-                   _impact.Contains(coord) ||
-                   _moveFree.Contains(coord) ||
-                   _moveCost.Contains(coord);
         }
     }
 }

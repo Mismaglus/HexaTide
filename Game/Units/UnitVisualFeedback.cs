@@ -42,6 +42,9 @@ namespace Game.Units
         private Quaternion _originalRot;
         private MaterialPropertyBlock _mpb;
 
+        // ⭐ 修复核心：追踪当前正在运行的协程
+        private Coroutine _activeRoutine;
+
         void Awake()
         {
             // 1. 优先确定 Visual Root
@@ -61,151 +64,183 @@ namespace Game.Units
                     renderers = GetComponentsInChildren<Renderer>(true);
             }
 
-            _originalPos = visualRoot.localPosition;
-            _originalRot = visualRoot.localRotation;
+            if (visualRoot)
+            {
+                _originalPos = visualRoot.localPosition;
+                _originalRot = visualRoot.localRotation;
+            }
             _mpb = new MaterialPropertyBlock();
         }
 
-        // === 1. 攻击反馈 (协程) ===
-        public IEnumerator PlayAttack(Vector3 targetWorldPos)
+        // --- 核心辅助：安全开启新协程 ---
+        private void StartNewRoutine(IEnumerator routine)
         {
-            if (useProcedural)
+            // 1. 如果有旧协程在跑，先停止
+            if (_activeRoutine != null)
             {
-                // --- 方案 A: 代码冲刺 ---
-                Vector3 dir = (targetWorldPos - transform.position).normalized;
-                Vector3 localDir = transform.InverseTransformDirection(dir);
-                localDir.y = 0;
-
-                Vector3 start = _originalPos;
-                Vector3 end = start + localDir * lungeDistance;
-
-                float t = 0;
-                while (t < 1f)
-                {
-                    t += Time.deltaTime / lungeDuration;
-                    visualRoot.localPosition = Vector3.Lerp(start, end, t * t);
-                    yield return null;
-                }
-
-                StartCoroutine(RecoverRoutine(start, end));
-            }
-            else
-            {
-                // --- 方案 B: 美术动画 ---
-                if (animator) animator.SetTrigger(animAttackTrigger);
-                yield return new WaitForSeconds(animImpactDelay);
-            }
-        }
-
-        private IEnumerator RecoverRoutine(Vector3 start, Vector3 end)
-        {
-            float t = 0;
-            float recoverTime = lungeDuration * 2f;
-            while (t < 1f)
-            {
-                t += Time.deltaTime / recoverTime;
-                visualRoot.localPosition = Vector3.Lerp(end, start, t * (2 - t));
-                yield return null;
-            }
-            visualRoot.localPosition = start;
-        }
-
-        // === 2. 受击反馈 (即时) ===
-        public void PlayHit()
-        {
-            if (useProcedural)
-            {
-                StopAllCoroutines();
-                ResetVisuals(); // 确保位置归正
-                StartCoroutine(ProceduralHitRoutine());
-            }
-            else
-            {
-                if (animator) animator.SetTrigger(animHitTrigger);
-            }
-        }
-
-        IEnumerator ProceduralHitRoutine()
-        {
-            // 变色
-            foreach (var r in renderers)
-            {
-                r.GetPropertyBlock(_mpb);
-                _mpb.SetColor("_BaseColor", hitColor);
-                _mpb.SetColor("_Color", hitColor);
-                r.SetPropertyBlock(_mpb);
+                StopCoroutine(_activeRoutine);
             }
 
-            // 震动
-            float elapsed = 0f;
-            while (elapsed < hitShakeDuration)
-            {
-                elapsed += Time.deltaTime;
-                visualRoot.localPosition = _originalPos + Random.insideUnitSphere * hitShakeAmount;
-                yield return null;
-            }
-
-            // 恢复
+            // 2. ⭐ 关键：每次打断旧动作时，必须强制重置状态 (颜色、位置)
             ResetVisuals();
-            foreach (var r in renderers)
-            {
-                r.SetPropertyBlock(null);
-            }
-        }
+            ResetColor();
 
-        // === 3. 击退反馈 (协程 - 由 KnockbackSystem 调用) ===
-        public IEnumerator PlayKnockback(Vector3 startPos, Vector3 endPos, float duration)
-        {
-            // 强行打断当前的任何动作（如受击震动）
-            StopAllCoroutines();
-
-            // 如果使用 Animator，触发击退状态 (Loop or Trigger)
-            if (!useProcedural && animator)
-            {
-                animator.SetTrigger(animKnockbackTrigger);
-            }
-
-            float t = 0f;
-            while (t < 1f)
-            {
-                t += Time.deltaTime / duration;
-
-                // EaseOut Sine: 模拟瞬间受力后因摩擦力减速
-                float ease = Mathf.Sin(t * Mathf.PI * 0.5f);
-
-                // 1. 位移插值 (控制根物体)
-                Vector3 currentPos = Vector3.Lerp(startPos, endPos, ease);
-
-                // 可选：抛物线高度
-                if (knockbackJumpHeight > 0.01f)
-                {
-                    float height = Mathf.Sin(t * Mathf.PI) * knockbackJumpHeight;
-                    currentPos.y += height;
-                }
-
-                transform.position = currentPos;
-
-                // 2. 姿态控制 (仅 procedural)
-                if (useProcedural)
-                {
-                    // 在滑行过程中保持后仰，结束时自动回正
-                    // 也可以做一个 t 的曲线让它先仰后回，这里简单处理为全程后仰
-                    float tiltAmount = Mathf.Lerp(knockbackTilt, 0f, t * t); // 慢慢回正
-                    visualRoot.localRotation = _originalRot * Quaternion.Euler(tiltAmount, 0f, 0f);
-                }
-
-                yield return null;
-            }
-
-            // 确保最终位置准确
-            transform.position = endPos;
-            ResetVisuals();
+            // 3. 启动新协程并记录
+            _activeRoutine = StartCoroutine(routine);
         }
 
         private void ResetVisuals()
         {
-            visualRoot.localPosition = _originalPos;
-            visualRoot.localRotation = _originalRot;
+            if (visualRoot)
+            {
+                visualRoot.localPosition = _originalPos;
+                visualRoot.localRotation = _originalRot;
+            }
+        }
+
+        private void ResetColor()
+        {
+            if (renderers == null) return;
+            foreach (var r in renderers)
+            {
+                if (r) r.SetPropertyBlock(null);
+            }
+        }
+
+        // =========================================================
+
+        public IEnumerator PlayAttack(Vector3 targetWorldPos)
+        {
+            IEnumerator Routine()
+            {
+                if (useProcedural)
+                {
+                    // --- 方案 A: 代码冲刺 ---
+                    Vector3 dir = (targetWorldPos - transform.position).normalized;
+                    Vector3 localDir = transform.InverseTransformDirection(dir);
+                    localDir.y = 0;
+
+                    Vector3 start = _originalPos;
+                    Vector3 end = start + localDir * lungeDistance;
+
+                    float t = 0;
+                    while (t < 1f)
+                    {
+                        t += Time.deltaTime / lungeDuration;
+                        visualRoot.localPosition = Vector3.Lerp(start, end, t * t);
+                        yield return null;
+                    }
+
+                    // 回弹
+                    t = 0;
+                    float recoverTime = lungeDuration * 2f;
+                    while (t < 1f)
+                    {
+                        t += Time.deltaTime / recoverTime;
+                        visualRoot.localPosition = Vector3.Lerp(end, start, t * (2 - t));
+                        yield return null;
+                    }
+                    visualRoot.localPosition = start;
+                }
+                else
+                {
+                    // --- 方案 B: 美术动画 ---
+                    if (animator) animator.SetTrigger(animAttackTrigger);
+                    yield return new WaitForSeconds(animImpactDelay);
+                }
+                _activeRoutine = null;
+            }
+
+            StartNewRoutine(Routine());
+            yield break; // Attack 不需要像 Knockback 那样返回 handle，外部等待时间即可
+        }
+
+        public void PlayHit()
+        {
+            IEnumerator Routine()
+            {
+                if (useProcedural)
+                {
+                    // 变色
+                    foreach (var r in renderers)
+                    {
+                        r.GetPropertyBlock(_mpb);
+                        _mpb.SetColor("_BaseColor", hitColor);
+                        _mpb.SetColor("_Color", hitColor);
+                        r.SetPropertyBlock(_mpb);
+                    }
+
+                    // 震动
+                    float elapsed = 0f;
+                    while (elapsed < hitShakeDuration)
+                    {
+                        elapsed += Time.deltaTime;
+                        if (visualRoot)
+                            visualRoot.localPosition = _originalPos + Random.insideUnitSphere * hitShakeAmount;
+                        yield return null;
+                    }
+
+                    // 恢复
+                    ResetColor();
+                    ResetVisuals();
+                }
+                else
+                {
+                    if (animator) animator.SetTrigger(animHitTrigger);
+                    yield return null;
+                }
+                _activeRoutine = null;
+            }
+
+            StartNewRoutine(Routine());
+        }
+
+        // === 3. 击退反馈 (协程) ===
+        // ⭐⭐⭐ 修复：返回类型改为 Coroutine，这样可以直接返回 _activeRoutine ⭐⭐⭐
+        public Coroutine PlayKnockback(Vector3 startPos, Vector3 endPos, float duration)
+        {
+            IEnumerator Routine()
+            {
+                if (!useProcedural && animator)
+                {
+                    animator.SetTrigger(animKnockbackTrigger);
+                }
+
+                float t = 0f;
+                while (t < 1f)
+                {
+                    t += Time.deltaTime / duration;
+                    float ease = Mathf.Sin(t * Mathf.PI * 0.5f);
+
+                    // 1. 位移
+                    Vector3 currentPos = Vector3.Lerp(startPos, endPos, ease);
+                    if (knockbackJumpHeight > 0.01f)
+                    {
+                        float height = Mathf.Sin(t * Mathf.PI) * knockbackJumpHeight;
+                        currentPos.y += height;
+                    }
+                    transform.position = currentPos;
+
+                    // 2. 姿态 (仅 procedural)
+                    if (useProcedural && visualRoot)
+                    {
+                        float tiltAmount = Mathf.Lerp(knockbackTilt, 0f, t * t);
+                        visualRoot.localRotation = _originalRot * Quaternion.Euler(tiltAmount, 0f, 0f);
+                    }
+
+                    yield return null;
+                }
+
+                // 确保最终位置准确
+                transform.position = endPos;
+                ResetVisuals();
+                _activeRoutine = null;
+            }
+
+            StartNewRoutine(Routine());
+
+            // 返回刚刚启动的协程对象，外部可以直接 yield return 它
+            return _activeRoutine;
         }
     }
 }

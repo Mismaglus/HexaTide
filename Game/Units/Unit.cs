@@ -28,7 +28,7 @@ namespace Game.Units
         public float unitYOffset = 0.02f;
 
         [Tooltip("如果是3D模型，勾选此项以在移动时旋转朝向")]
-        public bool faceMovement = true; // ? 3D 项目通常开启这个
+        public bool faceMovement = true;
         public bool autoInitializeIfMissing = true;
 
         [Header("Animation")]
@@ -38,6 +38,7 @@ namespace Game.Units
         public bool IsMoving => _moveRoutine != null;
 
         // 事件：(Unit, From, To)
+        // GridOccupancy 和 SelectionManager 都会监听这个事件来更新状态
         public System.Action<Unit, HexCoords, HexCoords> OnMoveFinished;
 
         Dictionary<HexCoords, Transform> _tileMap = new();
@@ -154,10 +155,29 @@ namespace Game.Units
             _lastGridVersion = 0; RebuildTileMap(); WarpTo(start);
         }
 
+        /// <summary>
+        /// 瞬间移动到某格（仅视觉+数据，不触发事件）
+        /// 用于初始化或 UnitMover 内部逻辑
+        /// </summary>
         public void WarpTo(HexCoords c)
         {
             Coords = c;
             if (TryGetTileTopWorld(c, out var top)) { transform.position = top; _hasValidCoords = true; }
+        }
+
+        /// <summary>
+        /// ? 新增：强制移动并触发 GridOccupancy 更新
+        /// 用于击退、传送等非 UnitMover 控制的位移
+        /// </summary>
+        public void ForceMove(HexCoords to)
+        {
+            if (Coords.Equals(to)) return;
+
+            HexCoords from = Coords;
+            WarpTo(to);
+
+            // 关键：手动触发完成事件，通知 GridOccupancy 和 SelectionManager 更新占位
+            OnMoveFinished?.Invoke(this, from, to);
         }
 
         // 简单的非战斗移动逻辑
@@ -175,7 +195,6 @@ namespace Game.Units
         {
             float t = 0f; float dur = Mathf.Max(0.01f, secondsPerTile);
 
-            // ? 纯 3D 旋转逻辑：只要开启 faceMovement 就根据移动方向旋转
             if (faceMovement)
             {
                 Vector3 dir = dst - src;

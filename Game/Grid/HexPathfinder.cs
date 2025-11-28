@@ -6,15 +6,21 @@ using Game.Units;
 
 namespace Game.Grid
 {
+    /// <summary>
+    /// A* 寻路与 Dijkstra 范围计算工具类
+    /// </summary>
     public static class HexPathfinder
     {
-        // ⭐ 增加 ignorePenalties 参数
+        /// <summary>
+        /// 寻找从 start 到 end 的最短路径。
+        /// </summary>
         public static List<HexCoords> FindPath(HexCoords start, HexCoords end, BattleRules rules, Unit unit, bool ignorePenalties = false)
         {
+            // 1. 初始化计算器
             var occupancy = Object.FindFirstObjectByType<GridOccupancy>();
             var calculator = new MovementCalculator(occupancy, rules);
 
-            // 检查终点是否合法
+            // 2. 检查目标点是否被完全阻挡
             if (calculator.GetMoveCost(start, end, unit, ignorePenalties) >= 999)
             {
                 Debug.LogWarning($"[Pathfinder] Target {end} is blocked or unreachable terrain.");
@@ -30,6 +36,7 @@ namespace Game.Grid
             cameFrom[start] = start;
             costSoFar[start] = 0;
 
+            // 防止搜索过多 (Max Steps)
             int safetyCounter = 0;
 
             while (frontier.Count > 0)
@@ -42,7 +49,6 @@ namespace Game.Grid
 
                 foreach (var next in current.Neighbors())
                 {
-                    // 传递参数
                     int moveCost = calculator.GetMoveCost(current, next, unit, ignorePenalties);
                     if (moveCost >= 999) continue;
 
@@ -51,7 +57,7 @@ namespace Game.Grid
                     if (!costSoFar.ContainsKey(next) || newCost < costSoFar[next])
                     {
                         costSoFar[next] = newCost;
-                        int priority = newCost + current.DistanceTo(end);
+                        int priority = newCost + current.DistanceTo(end); // 启发式
                         frontier.Enqueue(next, priority);
                         cameFrom[next] = current;
                     }
@@ -71,10 +77,14 @@ namespace Game.Grid
             return path;
         }
 
-        // ⭐ 增加 ignorePenalties 参数
+        /// <summary>
+        /// 获取所有可到达的格子及其消耗 (Dijkstra Flood Fill)
+        /// </summary>
         public static Dictionary<HexCoords, int> GetReachableCells(HexCoords start, int maxCost, BattleRules rules, Unit unit, bool ignorePenalties = false)
         {
             var results = new Dictionary<HexCoords, int>();
+
+            // 1. 初始化
             var occupancy = Object.FindFirstObjectByType<GridOccupancy>();
             var calculator = new MovementCalculator(occupancy, rules);
 
@@ -94,23 +104,28 @@ namespace Game.Grid
                 var current = frontier.Dequeue();
                 int currentCost = costSoFar[current];
 
+                // 如果当前消耗已经很大，虽然还能往外看，但通常没必要过度搜索
                 if (currentCost >= maxCost) continue;
 
                 foreach (var next in current.Neighbors())
                 {
-                    // 传递参数
+                    // 计算单步消耗 (含地形 + ZOC)
                     int moveCost = calculator.GetMoveCost(current, next, unit, ignorePenalties);
 
+                    // 999 代表阻挡/不可通行
                     if (moveCost >= 999) continue;
 
                     int newCost = currentCost + moveCost;
 
+                    // 只有在总消耗 <= maxCost 时才加入结果
                     if (newCost <= maxCost)
                     {
                         if (!costSoFar.ContainsKey(next) || newCost < costSoFar[next])
                         {
                             costSoFar[next] = newCost;
                             frontier.Enqueue(next, newCost);
+
+                            // 记录结果
                             results[next] = newCost;
                         }
                     }
@@ -120,16 +135,26 @@ namespace Game.Grid
             return results;
         }
 
+        // 简单的优先队列 (最小堆) 实现
         class PriorityQueue<T>
         {
             private List<KeyValuePair<T, int>> elements = new List<KeyValuePair<T, int>>();
+
             public int Count => elements.Count;
-            public void Enqueue(T item, int priority) => elements.Add(new KeyValuePair<T, int>(item, priority));
+
+            public void Enqueue(T item, int priority)
+            {
+                elements.Add(new KeyValuePair<T, int>(item, priority));
+            }
+
             public T Dequeue()
             {
                 int bestIndex = 0;
                 for (int i = 0; i < elements.Count; i++)
+                {
                     if (elements[i].Value < elements[bestIndex].Value) bestIndex = i;
+                }
+
                 T bestItem = elements[bestIndex].Key;
                 elements.RemoveAt(bestIndex);
                 return bestItem;

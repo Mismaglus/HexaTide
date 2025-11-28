@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
 using Game.Grid;
-using Game.Battle; // 引用 BattleUnit 和 BattleIntentSystem
+using Game.Battle;
 
 namespace Game.Units
 {
@@ -34,7 +34,8 @@ namespace Game.Units
 
         public bool IsMoving { get; private set; }
 
-        public Func<HexCoords, int> MovementCostProvider;
+        // ⭐ 关键修改：参数改为 (From, To)，以便计算 ZOC
+        public Func<HexCoords, HexCoords, int> MovementCostProvider;
 
         public event Action<HexCoords, HexCoords> OnMoveStarted;
         public event Action<HexCoords, HexCoords> OnMoveFinished;
@@ -99,14 +100,19 @@ namespace Game.Units
             {
                 if (!CanStepTo(nextStep))
                 {
-                    Debug.LogWarning("[UnitMover] Path interrupted.");
+                    Debug.LogWarning("[UnitMover] Path interrupted (Not enough resources).");
                     break;
                 }
 
-                int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(nextStep)) : 1;
+                // ⭐ 关键修改：传入 _mCoords (当前位置) 和 nextStep (目标位置)
+                int cost = 1;
+                if (MovementCostProvider != null)
+                {
+                    cost = Mathf.Max(1, MovementCostProvider(_mCoords, nextStep));
+                }
+
                 ConsumeResources(cost);
 
-                // ⭐⭐⭐ 关键修复：先缓存当前的坐标
                 HexCoords currentPos = _mCoords;
 
                 yield return StartCoroutine(CoMoveLerpOnly(_mCoords, nextStep, secondsPerTile));
@@ -114,7 +120,6 @@ namespace Game.Units
                 if (_unit) _unit.WarpTo(nextStep);
                 else _mCoords = nextStep;
 
-                // ⭐⭐⭐ 关键修复：使用缓存的上一格坐标 currentPos 作为 from
                 OnMoveFinished?.Invoke(currentPos, nextStep);
             }
 
@@ -170,7 +175,13 @@ namespace Game.Units
         public bool TryStepTo(HexCoords dst, Action onDone = null)
         {
             if (!CanStepTo(dst)) return false;
-            ConsumeResources(1);
+
+            // 单步消耗也需要计算
+            int cost = 1;
+            if (MovementCostProvider != null)
+                cost = Mathf.Max(1, MovementCostProvider(_mCoords, dst));
+
+            ConsumeResources(cost);
             OnMoveStarted?.Invoke(_mCoords, dst);
             StartCoroutine(CoMoveOneStepWrapper(_mCoords, dst, secondsPerTile, onDone));
             return true;
@@ -190,7 +201,12 @@ namespace Game.Units
         {
             if (_grid == null) return false;
             if (_mCoords.DistanceTo(dst) != 1) return false;
-            int cost = MovementCostProvider != null ? Mathf.Max(1, MovementCostProvider(dst)) : 1;
+
+            // ⭐ 预览时也需要计算真实消耗
+            int cost = 1;
+            if (MovementCostProvider != null)
+                cost = Mathf.Max(1, MovementCostProvider(_mCoords, dst));
+
             int totalRes = _attributes ? (_attributes.Core.CurrentStride + _attributes.Core.CurrentAP) : 0;
             return totalRes >= cost;
         }

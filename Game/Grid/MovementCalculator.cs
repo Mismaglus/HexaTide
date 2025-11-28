@@ -12,7 +12,7 @@ namespace Game.Grid
         private readonly BattleRules _rules;
         private readonly Dictionary<HexCoords, HexCell> _cellCache;
 
-        // ZOC 惩罚值
+        // ZOC 惩罚值：如果在敌人旁边移动，额外消耗多少 AP/Stride
         private const int ZOC_PENALTY = 1;
 
         public MovementCalculator(GridOccupancy occupancy, BattleRules rules)
@@ -29,20 +29,18 @@ namespace Game.Grid
             }
         }
 
-        // ⭐ 新增参数：ignorePenalties
         public int GetMoveCost(HexCoords from, HexCoords to, Unit mover, bool ignorePenalties = false)
         {
             // 1. 基础地形消耗
             if (!_cellCache.TryGetValue(to, out var targetCell)) return 999; // 无效格子
 
             // 即使无视地形消耗，如果是完全不可走的墙壁，通常依然不可走
-            // (除非是“飞行”单位，那是另一个逻辑)
             if (!targetCell.IsTerrainWalkable) return 999;
 
             // 如果 ignorePenalties = true，基础消耗强制为 1，否则查表
             int cost = ignorePenalties ? 1 : targetCell.GetBaseMoveCost();
 
-            // 2. 检查是否有单位阻挡
+            // 2. 检查是否有单位阻挡 (友军可穿过但不能停留，敌军不可穿过)
             if (_occupancy != null && _occupancy.TryGetUnitAt(to, out var blocker))
             {
                 if (_rules.IsEnemy(mover, blocker)) return 999;
@@ -66,6 +64,7 @@ namespace Game.Grid
             {
                 if (_occupancy.TryGetUnitAt(neighbor, out var unit))
                 {
+                    // 如果旁边站着敌人，则处于 ZOC
                     if (_rules.IsEnemy(friendlyUnit, unit))
                     {
                         return true;

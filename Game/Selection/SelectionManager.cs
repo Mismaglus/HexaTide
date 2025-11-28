@@ -83,6 +83,10 @@ namespace Game.Battle
                 }
 
                 OnSelectedUnitChanged?.Invoke(_selectedUnit);
+
+                // ⭐ 新增：当选中单位变化时，检查是否是占星术士(有预知能力)，并切换显示
+                CheckObserverCapability(_selectedUnit);
+
                 RecalcRange();
             }
         }
@@ -173,6 +177,28 @@ namespace Game.Battle
             if (SelectedUnit != null) RecalcRange();
         }
 
+        // ⭐ 检查并应用观察者能力
+        void CheckObserverCapability(Unit unit)
+        {
+            if (outlineManager == null) return;
+
+            bool canSeeFuture = false;
+
+            // 如果选中了单位，检查其属性
+            if (unit != null && unit.IsPlayerControlled)
+            {
+                if (unit.TryGetComponent<UnitAttributes>(out var attrs))
+                {
+                    canSeeFuture = attrs.Optional.CanSeeFutureIntents;
+                }
+            }
+
+            // 如果没选中单位，默认看不到（或者根据你的游戏设计，可能保留上一次的状态？）
+            // 这里假设没选中人就看不到未来信息
+
+            outlineManager.ToggleFutureVisibility(canSeeFuture);
+        }
+
         public bool HasUnitAt(HexCoords c)
         {
             if (_units.ContainsKey(c)) return true;
@@ -209,11 +235,9 @@ namespace Game.Battle
             if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
             if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords)) { Debug.Log("目标太远"); return; }
 
-            // === ⭐ 修改开始：移动开始时隐藏视觉元素 ===
             if (outlineManager)
             {
                 outlineManager.ClearMovementRange();
-                // 隐藏敌方意图，减少视觉干扰
                 outlineManager.ToggleEnemyIntent(false);
             }
 
@@ -225,7 +249,6 @@ namespace Game.Battle
                 highlighter.SetSelected(unit.Coords);
                 RecalcRange();
 
-                // === ⭐ 修改：移动结束后恢复显示，此时 BattleIntentSystem 应该已经计算完新的危险区了 ===
                 if (outlineManager)
                 {
                     outlineManager.ToggleEnemyIntent(true);
@@ -250,7 +273,6 @@ namespace Game.Battle
             _selected = null;
             highlighter.SetSelected(null);
 
-            // 清理
             ClearVisuals();
             if (outlineManager) outlineManager.SetState(OutlineState.None);
 
@@ -259,7 +281,6 @@ namespace Game.Battle
             if (_hoveredUnit != null && _hoveredUnit != SelectedUnit) GetHighlighter(_hoveredUnit)?.SetHover(true);
         }
 
-        // ⭐ 修复：移除了不存在的 drawer 引用，改为调用 Manager
         void ClearVisuals()
         {
             if (outlineManager) outlineManager.ClearMovementRange();
@@ -359,8 +380,6 @@ namespace Game.Battle
             {
                 if (SelectedUnit.IsPlayerControlled && SelectedUnit.TryGetComponent<UnitAttributes>(out var attrs))
                 {
-
-                    // 如果在移动中，清空并不画
                     if (SelectedUnit.TryGetComponent<UnitMover>(out var mover) && mover.IsMoving)
                     {
                         if (outlineManager) outlineManager.ClearMovementRange();
@@ -369,7 +388,6 @@ namespace Game.Battle
 
                     HexCoords center = SelectedUnit.Coords; int stride = attrs.Core.CurrentStride; int ap = attrs.Core.CurrentAP;
 
-                    // 这里的逻辑可以根据需求微调：比如 AP=0 Stride=0 时不画
                     if (stride == 0 && ap == 0)
                     {
                         if (outlineManager) outlineManager.ClearMovementRange();

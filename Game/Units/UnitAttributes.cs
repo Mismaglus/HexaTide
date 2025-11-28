@@ -41,7 +41,6 @@ namespace Game.Units
             [Range(0, 50)] public int MPRecovery;
 
             [Header("Movement & Defense")]
-            // ⭐ 修复：限制 Max Stride 为 2~6
             [Tooltip("Max movement steps per turn.")]
             [Range(2, 6)] public int Stride;
 
@@ -62,13 +61,11 @@ namespace Game.Units
                     Faith = 10,
                     HPMax = 100,
                     HP = 100,
-
                     MaxAP = 4,
                     CurrentAP = 4,
                     MPMax = 50,
                     MP = 50,
                     MPRecovery = 2,
-
                     Stride = 3,
                     CurrentStride = 3,
                     Initiative = 20,
@@ -79,19 +76,10 @@ namespace Game.Units
 
             public void Clamp()
             {
-                HPMax = Mathf.Max(1, HPMax);
-                HP = Mathf.Clamp(HP, 0, HPMax);
-
-                MPMax = Mathf.Max(0, MPMax);
-                MP = Mathf.Clamp(MP, 0, MPMax);
-                MPRecovery = Mathf.Max(0, MPRecovery);
-
-                MaxAP = Mathf.Clamp(MaxAP, 0, 10);
-                CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
-
-                // ⭐ 修复：Clamp 逻辑
-                Stride = Mathf.Clamp(Stride, 2, 6);
-                CurrentStride = Mathf.Clamp(CurrentStride, 0, Stride);
+                HPMax = Mathf.Max(1, HPMax); HP = Mathf.Clamp(HP, 0, HPMax);
+                MPMax = Mathf.Max(0, MPMax); MP = Mathf.Clamp(MP, 0, MPMax); MPRecovery = Mathf.Max(0, MPRecovery);
+                MaxAP = Mathf.Clamp(MaxAP, 0, 10); CurrentAP = Mathf.Clamp(CurrentAP, 0, MaxAP);
+                Stride = Mathf.Clamp(Stride, 2, 6); CurrentStride = Mathf.Clamp(CurrentStride, 0, Stride);
             }
         }
 
@@ -121,7 +109,12 @@ namespace Game.Units
             public int Ammo;
             public int SightRange;
             public bool RequiresLoS;
-            public static OptionalAttributes Default() => new OptionalAttributes { SightRange = 6, RequiresLoS = true };
+
+            // ⭐ 新增：是否有能力看到未来（黄色）意图
+            [Tooltip("If true, this unit can see Future (Yellow/Orange) intents.")]
+            public bool CanSeeFutureIntents;
+
+            public static OptionalAttributes Default() => new OptionalAttributes { SightRange = 6, RequiresLoS = true, CanSeeFutureIntents = false };
             public void Clamp() { Shield = Mathf.Max(0, Shield); }
         }
     }

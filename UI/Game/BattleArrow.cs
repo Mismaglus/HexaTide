@@ -6,9 +6,9 @@ namespace Game.UI
     public class BattleArrow : MonoBehaviour
     {
         [Header("Settings")]
-        public float arcHeight = 1.5f; // 抛物线高度
-        public int resolution = 20;    // 曲线平滑度
-        public float textureScrollSpeed = -2f; // 纹理滚动速度 (箭头流动效果)
+        public float arcHeight = 1.5f;
+        public int resolution = 20;
+        public float textureScrollSpeed = -2f;
 
         private LineRenderer _lr;
         private Vector3 _start;
@@ -22,12 +22,19 @@ namespace Game.UI
             _lr.enabled = false;
         }
 
-        public void SetPositions(Vector3 start, Vector3 end)
+        // ⭐ 新增：支持传入颜色
+        public void SetPositions(Vector3 start, Vector3 end, Color color)
         {
             _start = start;
             _end = end;
             _active = true;
             _lr.enabled = true;
+
+            // 设置颜色 (注意：使用的材质 shader 需要支持 Vertex Color 或者我们要改 Main Color)
+            // 这里简单设置 LineRenderer 的颜色
+            _lr.startColor = color;
+            _lr.endColor = color;
+
             UpdateCurve();
         }
 
@@ -41,21 +48,17 @@ namespace Game.UI
         {
             if (!_active) return;
 
-            // 1. 纹理流动动画
             if (_lr.material != null)
             {
                 float offset = Time.time * textureScrollSpeed;
                 _lr.material.mainTextureOffset = new Vector2(offset, 0);
             }
 
-            // 2. 实时更新曲线 (以防目标或相机微动)
             UpdateCurve();
         }
 
         void UpdateCurve()
         {
-            // 简单的二次贝塞尔曲线
-            // 控制点在起点和终点的中点上方
             Vector3 mid = (_start + _end) * 0.5f;
             mid.y += arcHeight;
 

@@ -52,12 +52,20 @@ namespace Game.Battle
         HexCoords? _hoverCache;
 
         HashSet<HexCoords> _currentFreeSet = new HashSet<HexCoords>();
-        HashSet<HexCoords> _currentCostSet = new HashSet<HexCoords>();
+        HashSet<HexCoords> _currentCostSet = new HashSet<HexCoords>(); // 现在这个集合可能永远为空，或者留给别的特殊用途
 
         readonly Dictionary<HexCoords, Unit> _units = new();
 
         [Header("Data Source")]
         [SerializeField] private GridOccupancy occupancy;
+
+        // ⭐ 战术动作状态：是否激活了“疾跑/无视惩罚”模式
+        private bool _isTacticalMoveActive = false;
+        public bool IsTacticalMoveActive => _isTacticalMoveActive;
+        public event Action<bool> OnTacticalStateChanged;
+
+        // 战术动作消耗
+        private const int TACTICAL_AP_COST = 1;
 
         Unit _selectedUnit;
 
@@ -68,7 +76,6 @@ namespace Game.Battle
             {
                 if (_selectedUnit == value) return;
 
-                // 1. 取消订阅旧单位
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var oldBu))
                 {
                     oldBu.OnResourcesChanged -= HandleUnitResourcesChanged;
@@ -76,15 +83,16 @@ namespace Game.Battle
 
                 _selectedUnit = value;
 
-                // 2. 订阅新单位
+                // 换人时重置战术状态
+                _isTacticalMoveActive = false;
+                OnTacticalStateChanged?.Invoke(false);
+
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var newBu))
                 {
                     newBu.OnResourcesChanged += HandleUnitResourcesChanged;
                 }
 
                 OnSelectedUnitChanged?.Invoke(_selectedUnit);
-
-                // ⭐ 新增：当选中单位变化时，检查是否是占星术士(有预知能力)，并切换显示
                 CheckObserverCapability(_selectedUnit);
 
                 RecalcRange();
@@ -109,18 +117,12 @@ namespace Game.Battle
             if (_battleSM == null) _battleSM = FindFirstObjectByType<BattleStateMachine>();
             if (targetingSystem == null) targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>();
             if (battleRules == null) battleRules = FindFirstObjectByType<BattleRules>();
-
             if (gridCursor == null) gridCursor = FindFirstObjectByType<BattleCursor>();
             if (outlineManager == null) outlineManager = FindFirstObjectByType<GridOutlineManager>();
-
             if (occupancy == null)
             {
                 occupancy = FindFirstObjectByType<GridOccupancy>();
-                if (occupancy == null)
-                {
-                    var go = new GameObject("GridOccupancy_Auto");
-                    occupancy = go.AddComponent<GridOccupancy>();
-                }
+                if (occupancy == null) { var go = new GameObject("GridOccupancy_Auto"); occupancy = go.AddComponent<GridOccupancy>(); }
             }
         }
 
@@ -145,7 +147,6 @@ namespace Game.Battle
         {
             var controlSvc = PlayerControlService.Instance;
             if (controlSvc != null && !controlSvc.IsControlEnabled) return;
-
 #if ENABLE_INPUT_SYSTEM
             var kb = Keyboard.current;
             if (kb != null && kb.escapeKey.wasPressedThisFrame) Deselect();
@@ -156,68 +157,66 @@ namespace Game.Battle
 
         void OnEnable()
         {
-            if (input != null)
-            {
-                input.OnTileClicked += OnTileClicked;
-                input.OnHoverChanged += OnHoverChanged;
-            }
+            if (input != null) { input.OnTileClicked += OnTileClicked; input.OnHoverChanged += OnHoverChanged; }
         }
         void OnDisable()
         {
-            if (input != null)
-            {
-                input.OnTileClicked -= OnTileClicked;
-                input.OnHoverChanged -= OnHoverChanged;
-            }
+            if (input != null) { input.OnTileClicked -= OnTileClicked; input.OnHoverChanged -= OnHoverChanged; }
         }
 
-        // 资源变化回调
+        // === ⭐ API: 切换战术动作 (UI 绑定用) ===
+        public void ToggleTacticalAction()
+        {
+            if (SelectedUnit == null) return;
+
+            // 检查是否有足够资源开启 (虽然开启不扣费，但如果AP不够1，开了也没用，因为移动结算时会扣)
+            // 或者我们可以设定：开启这个状态本身不预扣，移动结算时再扣。
+            // 这里采用：如果AP < 1，不允许开启。
+            var battleUnit = SelectedUnit.GetComponent<BattleUnit>();
+            if (battleUnit != null && battleUnit.CurAP < TACTICAL_AP_COST && !_isTacticalMoveActive)
+            {
+                Debug.Log("Not enough AP for Tactical Sprint!");
+                return;
+            }
+
+            _isTacticalMoveActive = !_isTacticalMoveActive;
+            OnTacticalStateChanged?.Invoke(_isTacticalMoveActive);
+            RecalcRange();
+        }
+
+        // 供外部直接设置（如取消）
+        public void SetTacticalAction(bool active)
+        {
+            if (_isTacticalMoveActive == active) return;
+            _isTacticalMoveActive = active;
+            OnTacticalStateChanged?.Invoke(_isTacticalMoveActive);
+            RecalcRange();
+        }
+
         void HandleUnitResourcesChanged()
         {
             if (SelectedUnit != null) RecalcRange();
         }
 
-        // ⭐ 检查并应用观察者能力
         void CheckObserverCapability(Unit unit)
         {
             if (outlineManager == null) return;
-
             bool canSeeFuture = false;
-
-            // 如果选中了单位，检查其属性
             if (unit != null && unit.IsPlayerControlled)
             {
                 if (unit.TryGetComponent<UnitAttributes>(out var attrs))
-                {
                     canSeeFuture = attrs.Optional.CanSeeFutureIntents;
-                }
             }
-
-            // 如果没选中单位，默认看不到（或者根据你的游戏设计，可能保留上一次的状态？）
-            // 这里假设没选中人就看不到未来信息
-
             outlineManager.ToggleFutureVisibility(canSeeFuture);
         }
 
-        public bool HasUnitAt(HexCoords c)
-        {
-            if (_units.ContainsKey(c)) return true;
-            return occupancy != null && occupancy.HasUnitAt(c);
-        }
+        public bool HasUnitAt(HexCoords c) { if (_units.ContainsKey(c)) return true; return occupancy != null && occupancy.HasUnitAt(c); }
         public bool IsEmpty(HexCoords c) => !HasUnitAt(c);
-
         public bool TryGetUnitAt(HexCoords c, out Unit u)
         {
             if (_units.TryGetValue(c, out u)) return true;
-            if (occupancy != null && occupancy.TryGetUnitAt(c, out var occ))
-            {
-                RemoveUnitMapping(occ);
-                _units[c] = occ;
-                u = occ;
-                return true;
-            }
-            u = null;
-            return false;
+            if (occupancy != null && occupancy.TryGetUnitAt(c, out var occ)) { RemoveUnitMapping(occ); _units[c] = occ; u = occ; return true; }
+            u = null; return false;
         }
 
         void HandleClickOnEmptyTile(HexCoords targetCoords)
@@ -228,31 +227,63 @@ namespace Game.Battle
             if (!unit.IsPlayerControlled) return;
             if (unit.Coords.Equals(targetCoords)) return;
             if (HasUnitAt(targetCoords)) return;
+
+            // ⭐ 检查：目标是否在可达范围内 (Free Set)
+            // 因为现在所有可达格子（包括开启疾跑后的）都放在 _currentFreeSet 里
+            if (!_currentFreeSet.Contains(targetCoords))
+            {
+                Debug.Log("Target out of range.");
+                return;
+            }
+
             if (!unit.TryGetComponent<UnitMover>(out var mover)) return;
             if (mover.IsMoving) return;
             if (battleRules == null) return;
-            var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit);
-            if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
-            if (!_currentFreeSet.Contains(targetCoords) && !_currentCostSet.Contains(targetCoords)) { Debug.Log("目标太远"); return; }
 
-            if (outlineManager)
+            // ⭐ 寻路时也要传入 ignorePenalties
+            var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit, _isTacticalMoveActive);
+
+            if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
+
+            // ⭐ 扣费逻辑：
+            // 如果开启了战术动作，我们需要手动扣除 1 AP (作为开启状态的代价)
+            // UnitMover 内部只扣 Stride (因为传入了 ignorePenalties，路径cost全是1)
+            if (_isTacticalMoveActive)
             {
-                outlineManager.ClearMovementRange();
-                outlineManager.ToggleEnemyIntent(false);
+                var bu = unit.GetComponent<BattleUnit>();
+                if (bu != null) bu.TrySpendAP(TACTICAL_AP_COST);
             }
+
+            // 配置 UnitMover 的临时 Cost Provider (虽然 Pathfinder 已经算过了，但 Mover 内部还需要 Check)
+            // 我们可以简单地临时覆盖 Mover 的逻辑，或者不做处理，因为 Mover.ConsumeResources 依赖 cost
+            // 这里我们采用简单方案：如果在疾跑模式，路径消耗由我们上面手动扣了AP，
+            // Mover 内部应该只扣 Stride (按每格1计算)
+
+            // 在 Mover 启动前，我们需要一种方式告诉它“这次移动无视地形消耗”
+            // 由于 UnitMover.MovementCostProvider 是个 Func，我们可以临时改它
+            var originalProvider = mover.MovementCostProvider;
+            if (_isTacticalMoveActive)
+            {
+                mover.MovementCostProvider = (hex) => 1; // 强制所有消耗为1
+            }
+
+            if (outlineManager) { outlineManager.ClearMovementRange(); outlineManager.ToggleEnemyIntent(false); }
 
             mover.FollowPath(path, onComplete: () =>
             {
+                // 还原 Provider
+                if (_isTacticalMoveActive) mover.MovementCostProvider = originalProvider;
+
                 RemoveUnitMapping(unit);
                 _units[unit.Coords] = unit;
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
-                RecalcRange();
 
-                if (outlineManager)
-                {
-                    outlineManager.ToggleEnemyIntent(true);
-                }
+                // ⭐ 移动结束后，自动关闭战术状态
+                SetTacticalAction(false);
+
+                RecalcRange();
+                if (outlineManager) outlineManager.ToggleEnemyIntent(true);
             });
         }
 
@@ -260,72 +291,24 @@ namespace Game.Battle
         {
             if (u == null) return null;
             if (_HighlighterCache.TryGetValue(u, out var v) && v != null) return v;
-            v = u.GetComponentInChildren<UnitHighlighter>(true);
-            _HighlighterCache[u] = v;
-            return v;
+            v = u.GetComponentInChildren<UnitHighlighter>(true); _HighlighterCache[u] = v; return v;
         }
 
         void Deselect()
         {
-            var current = SelectedUnit;
-            if (current == null) return;
-            GetHighlighter(current)?.SetSelected(false);
-            _selected = null;
-            highlighter.SetSelected(null);
-
-            ClearVisuals();
-            if (outlineManager) outlineManager.SetState(OutlineState.None);
-
-            ApplyCursor(cursorDefault);
-            SelectedUnit = null;
+            var current = SelectedUnit; if (current == null) return;
+            GetHighlighter(current)?.SetSelected(false); _selected = null; highlighter.SetSelected(null);
+            ClearVisuals(); if (outlineManager) outlineManager.SetState(OutlineState.None);
+            ApplyCursor(cursorDefault); SelectedUnit = null;
             if (_hoveredUnit != null && _hoveredUnit != SelectedUnit) GetHighlighter(_hoveredUnit)?.SetHover(true);
         }
 
-        void ClearVisuals()
-        {
-            if (outlineManager) outlineManager.ClearMovementRange();
-            if (gridCursor) gridCursor.Hide();
-        }
+        void ClearVisuals() { if (outlineManager) outlineManager.ClearMovementRange(); if (gridCursor) gridCursor.Hide(); }
 
-        public void RegisterUnit(Unit u)
-        {
-            if (u == null) return;
-            if (occupancy != null) occupancy.Register(u);
-            RemoveUnitMapping(u);
-            _units[u.Coords] = u;
-            u.OnMoveFinished -= OnUnitMoveFinished;
-            u.OnMoveFinished += OnUnitMoveFinished;
-            _ = GetHighlighter(u);
-        }
-
-        public void UnregisterUnit(Unit u)
-        {
-            if (u == null) return;
-            if (occupancy != null) occupancy.Unregister(u);
-            u.OnMoveFinished -= OnUnitMoveFinished;
-            var vis = GetHighlighter(u);
-            vis?.SetHover(false);
-            vis?.SetSelected(false);
-            if (_hoveredUnit == u) _hoveredUnit = null;
-            RemoveUnitMapping(u);
-            if (SelectedUnit == u) { _selected = null; highlighter.SetSelected(null); SelectedUnit = null; }
-        }
-
-        public void SyncUnit(Unit u)
-        {
-            if (u == null) return;
-            if (occupancy != null) occupancy.SyncUnit(u);
-            RemoveUnitMapping(u);
-            _units[u.Coords] = u;
-        }
-
-        void RemoveUnitMapping(Unit u)
-        {
-            HexCoords keyToRemove = default;
-            bool found = false;
-            foreach (var kv in _units) { if (kv.Value == u) { keyToRemove = kv.Key; found = true; break; } }
-            if (found) _units.Remove(keyToRemove);
-        }
+        public void RegisterUnit(Unit u) { if (u == null) return; if (occupancy != null) occupancy.Register(u); RemoveUnitMapping(u); _units[u.Coords] = u; u.OnMoveFinished -= OnUnitMoveFinished; u.OnMoveFinished += OnUnitMoveFinished; _ = GetHighlighter(u); }
+        public void UnregisterUnit(Unit u) { if (u == null) return; if (occupancy != null) occupancy.Unregister(u); u.OnMoveFinished -= OnUnitMoveFinished; var vis = GetHighlighter(u); vis?.SetHover(false); vis?.SetSelected(false); if (_hoveredUnit == u) _hoveredUnit = null; RemoveUnitMapping(u); if (SelectedUnit == u) { _selected = null; highlighter.SetSelected(null); SelectedUnit = null; } }
+        public void SyncUnit(Unit u) { if (u == null) return; if (occupancy != null) occupancy.SyncUnit(u); RemoveUnitMapping(u); _units[u.Coords] = u; }
+        void RemoveUnitMapping(Unit u) { HexCoords keyToRemove = default; bool found = false; foreach (var kv in _units) { if (kv.Value == u) { keyToRemove = kv.Key; found = true; break; } } if (found) _units.Remove(keyToRemove); }
 
         void OnHoverChanged(HexCoords? h)
         {
@@ -337,9 +320,13 @@ namespace Game.Battle
             if (unitUnderMouse != null) { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorHoverSelectable); }
             else if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
-                HexCoords pos = h.Value; bool isFree = _currentFreeSet.Contains(pos); bool isCost = _currentCostSet.Contains(pos); bool isValid = isFree || isCost;
-                if (gridCursor) gridCursor.Show(pos, isValid);
-                if (isFree) ApplyCursor(cursorMoveFree); else if (isCost) ApplyCursor(cursorMoveCost); else ApplyCursor(cursorInvalid);
+                HexCoords pos = h.Value;
+                // 现在所有可达点都在 FreeSet 里 (无论是否开了疾跑)
+                bool isFree = _currentFreeSet.Contains(pos);
+                // CostSet 留空或备用
+
+                if (gridCursor) gridCursor.Show(pos, isFree);
+                if (isFree) ApplyCursor(cursorMoveFree); else ApplyCursor(cursorInvalid);
             }
             else { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorDefault); }
 
@@ -386,22 +373,44 @@ namespace Game.Battle
                         return;
                     }
 
-                    HexCoords center = SelectedUnit.Coords; int stride = attrs.Core.CurrentStride; int ap = attrs.Core.CurrentAP;
+                    HexCoords center = SelectedUnit.Coords;
+                    int stride = attrs.Core.CurrentStride;
 
-                    if (stride == 0 && ap == 0)
+                    // 如果开启了战术移动，我们的移动预算就是 stride (因为无视了地形消耗，所以 1步=1格)
+                    // 如果没开，预算也是 stride，但每格消耗可能 > 1
+                    int maxCost = stride;
+
+                    if (maxCost == 0)
                     {
                         if (outlineManager) outlineManager.ClearMovementRange();
                         return;
                     }
 
-                    if (stride > 0) foreach (var c in center.Disk(stride)) _currentFreeSet.Add(c); else _currentFreeSet.Add(center);
-                    int totalRange = stride + ap;
-                    if (ap > 0) foreach (var c in center.Disk(totalRange)) if (!_currentFreeSet.Contains(c)) _currentCostSet.Add(c);
-                    if (outlineManager) { outlineManager.SetMovementRange(_currentFreeSet, _currentCostSet); outlineManager.SetState(OutlineState.Movement); }
+                    // ⭐ 调用核心：传入 _isTacticalMoveActive (是否无视惩罚)
+                    var reachable = HexPathfinder.GetReachableCells(center, maxCost, battleRules, SelectedUnit, _isTacticalMoveActive);
+
+                    foreach (var kv in reachable)
+                    {
+                        HexCoords pos = kv.Key;
+                        _currentFreeSet.Add(center);
+                        if (kv.Value == 0) continue;
+
+                        // 所有可达点都是 Free (因为消耗已经被包含在 Stride 内了，额外的 AP 消耗是点击按钮时扣的)
+                        _currentFreeSet.Add(pos);
+                    }
+
+                    if (outlineManager)
+                    {
+                        // 把所有可达点传给 Free Drawer，Cost Drawer 留空
+                        outlineManager.SetMovementRange(_currentFreeSet, null);
+                        outlineManager.SetState(OutlineState.Movement);
+                    }
+
                     if (_hoverCache.HasValue) OnHoverChanged(_hoverCache);
                 }
                 return;
             }
+
             if (debugRangeMode != RangeMode.None && _hoverCache.HasValue && outlineManager)
             {
                 var set = new HashSet<HexCoords>();

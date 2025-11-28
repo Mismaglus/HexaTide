@@ -6,6 +6,7 @@ using Game.Units;
 using Game.Battle.AI;
 using Game.Battle.Abilities;
 using Game.Grid;
+using Game.Common; // 引用 HexHighlighter
 
 namespace Game.Battle
 {
@@ -15,6 +16,7 @@ namespace Game.Battle
 
         [Header("Visuals")]
         public GridOutlineManager outlineManager;
+        public HexHighlighter highlighter; // ⭐ 必须引用这个才能让地板变色
 
         private List<EnemyBrain> _enemies = new List<EnemyBrain>();
         private BattleStateMachine _sm;
@@ -27,6 +29,7 @@ namespace Game.Battle
         {
             Instance = this;
             if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>();
+            if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(); // 自动查找
             _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
@@ -44,7 +47,11 @@ namespace Game.Battle
             }
             else
             {
+                // 敌人回合开始，隐藏所有意图提示
                 if (outlineManager) outlineManager.SetEnemyIntent(null, null);
+
+                // ⭐ 清除地板高亮
+                if (highlighter) highlighter.SetEnemyDanger(null);
             }
         }
 
@@ -62,7 +69,9 @@ namespace Game.Battle
         public void UpdateIntents()
         {
             if (_sm != null && _sm.CurrentTurn != TurnSide.Player) return;
-            if (!outlineManager) return;
+
+            // 即使没有 outlineManager 也要跑计算，因为可能需要 highlighter
+            // if (!outlineManager) return; 
 
             _dangerZone.Clear();
             _arrowList.Clear();
@@ -78,11 +87,13 @@ namespace Game.Battle
                 {
                     if (plan.ability != null)
                     {
-                        // ⭐ 修改：获取敌人 Unit 组件并传入坐标
                         var enemyUnit = enemy.GetComponent<Unit>();
 
-                        // 传入 enemyUnit.Coords，这样敌人的扇形/直线也能正确显示红色危险区
-                        var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability, enemyUnit.Coords);
+                        // ⭐ 修正：使用计划中的移动终点 (moveDest) 作为施法原点
+                        // 这样如果怪物是“移动后攻击”，扇形/直线会从新位置发出
+                        HexCoords castOrigin = plan.moveDest;
+
+                        var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability, castOrigin);
 
                         _dangerZone.UnionWith(area);
 
@@ -96,7 +107,12 @@ namespace Game.Battle
                 }
             }
 
-            outlineManager.SetEnemyIntent(_dangerZone, _arrowList);
+            // 1. 更新红圈和箭头 (GridOutlineManager)
+            if (outlineManager) outlineManager.SetEnemyIntent(_dangerZone, _arrowList);
+
+            // 2. ⭐⭐⭐ 更新地板红色高亮 (HexHighlighter)
+            // 这就是之前缺少的关键一步！
+            if (highlighter) highlighter.SetEnemyDanger(_dangerZone);
         }
     }
 }

@@ -8,21 +8,15 @@ namespace Game.Grid
 {
     public static class HexPathfinder
     {
-        /// <summary>
-        /// 寻找从 start 到 end 的最短路径，考虑地形消耗和 ZOC。
-        /// </summary>
-        public static List<HexCoords> FindPath(HexCoords start, HexCoords end, BattleRules rules, Unit unit)
+        // ⭐ 增加 ignorePenalties 参数
+        public static List<HexCoords> FindPath(HexCoords start, HexCoords end, BattleRules rules, Unit unit, bool ignorePenalties = false)
         {
-            // 1. 初始化计算器
             var occupancy = Object.FindFirstObjectByType<GridOccupancy>();
             var calculator = new MovementCalculator(occupancy, rules);
 
-            // 2. 检查目标点是否被完全阻挡 (例如是墙壁或被敌人占据)
-            // 注意：GetMoveCost 会返回 999 表示不可通行
-            if (calculator.GetMoveCost(start, end, unit) >= 999)
+            // 检查终点是否合法
+            if (calculator.GetMoveCost(start, end, unit, ignorePenalties) >= 999)
             {
-                // 特殊情况：如果目标点虽然有单位，但是我们只是想寻路到它旁边攻击，
-                // A* 应该寻路到 Adjacent。但这里是 Move 寻路，所以如果终点不可走，就是不可达。
                 Debug.LogWarning($"[Pathfinder] Target {end} is blocked or unreachable terrain.");
                 return null;
             }
@@ -36,12 +30,11 @@ namespace Game.Grid
             cameFrom[start] = start;
             costSoFar[start] = 0;
 
-            // 防止搜索过多 (Max Steps)
             int safetyCounter = 0;
 
             while (frontier.Count > 0)
             {
-                if (safetyCounter++ > 1000) break;
+                if (safetyCounter++ > 2000) break;
 
                 var current = frontier.Dequeue();
 
@@ -49,10 +42,8 @@ namespace Game.Grid
 
                 foreach (var next in current.Neighbors())
                 {
-                    // 计算从 current -> next 的实际消耗 (含 Terrain + ZOC)
-                    int moveCost = calculator.GetMoveCost(current, next, unit);
-
-                    // 如果不可通行
+                    // 传递参数
+                    int moveCost = calculator.GetMoveCost(current, next, unit, ignorePenalties);
                     if (moveCost >= 999) continue;
 
                     int newCost = costSoFar[current] + moveCost;
@@ -60,7 +51,7 @@ namespace Game.Grid
                     if (!costSoFar.ContainsKey(next) || newCost < costSoFar[next])
                     {
                         costSoFar[next] = newCost;
-                        int priority = newCost + current.DistanceTo(end); // 启发式
+                        int priority = newCost + current.DistanceTo(end);
                         frontier.Enqueue(next, priority);
                         cameFrom[next] = current;
                     }
@@ -78,6 +69,55 @@ namespace Game.Grid
             }
             path.Reverse();
             return path;
+        }
+
+        // ⭐ 增加 ignorePenalties 参数
+        public static Dictionary<HexCoords, int> GetReachableCells(HexCoords start, int maxCost, BattleRules rules, Unit unit, bool ignorePenalties = false)
+        {
+            var results = new Dictionary<HexCoords, int>();
+            var occupancy = Object.FindFirstObjectByType<GridOccupancy>();
+            var calculator = new MovementCalculator(occupancy, rules);
+
+            var frontier = new PriorityQueue<HexCoords>();
+            frontier.Enqueue(start, 0);
+
+            var costSoFar = new Dictionary<HexCoords, int>();
+            costSoFar[start] = 0;
+            results[start] = 0;
+
+            int safetyCounter = 0;
+
+            while (frontier.Count > 0)
+            {
+                if (safetyCounter++ > 5000) break;
+
+                var current = frontier.Dequeue();
+                int currentCost = costSoFar[current];
+
+                if (currentCost >= maxCost) continue;
+
+                foreach (var next in current.Neighbors())
+                {
+                    // 传递参数
+                    int moveCost = calculator.GetMoveCost(current, next, unit, ignorePenalties);
+
+                    if (moveCost >= 999) continue;
+
+                    int newCost = currentCost + moveCost;
+
+                    if (newCost <= maxCost)
+                    {
+                        if (!costSoFar.ContainsKey(next) || newCost < costSoFar[next])
+                        {
+                            costSoFar[next] = newCost;
+                            frontier.Enqueue(next, newCost);
+                            results[next] = newCost;
+                        }
+                    }
+                }
+            }
+
+            return results;
         }
 
         class PriorityQueue<T>

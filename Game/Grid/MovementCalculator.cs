@@ -12,7 +12,7 @@ namespace Game.Grid
         private readonly BattleRules _rules;
         private readonly Dictionary<HexCoords, HexCell> _cellCache;
 
-        // ZOC 惩罚值：如果在敌人旁边移动，额外消耗多少 AP/Stride
+        // ZOC 惩罚值
         private const int ZOC_PENALTY = 1;
 
         public MovementCalculator(GridOccupancy occupancy, BattleRules rules)
@@ -29,26 +29,28 @@ namespace Game.Grid
             }
         }
 
-        public int GetMoveCost(HexCoords from, HexCoords to, Unit mover)
+        // ⭐ 新增参数：ignorePenalties
+        public int GetMoveCost(HexCoords from, HexCoords to, Unit mover, bool ignorePenalties = false)
         {
             // 1. 基础地形消耗
             if (!_cellCache.TryGetValue(to, out var targetCell)) return 999; // 无效格子
-            if (!targetCell.IsTerrainWalkable) return 999; // 地形不可走
 
-            int cost = targetCell.GetBaseMoveCost();
+            // 即使无视地形消耗，如果是完全不可走的墙壁，通常依然不可走
+            // (除非是“飞行”单位，那是另一个逻辑)
+            if (!targetCell.IsTerrainWalkable) return 999;
 
-            // 2. 检查是否有单位阻挡 (友军可穿过但不能停留，敌军不可穿过)
-            // 注意：A* 算法中，如果是中间节点，通常允许穿过友军。
-            // 这里我们简化：如果有单位且是敌人，则不可通行 (Cost无限)
+            // 如果 ignorePenalties = true，基础消耗强制为 1，否则查表
+            int cost = ignorePenalties ? 1 : targetCell.GetBaseMoveCost();
+
+            // 2. 检查是否有单位阻挡
             if (_occupancy != null && _occupancy.TryGetUnitAt(to, out var blocker))
             {
                 if (_rules.IsEnemy(mover, blocker)) return 999;
             }
 
             // 3. ZOC (Zone of Control) 判定
-            // 规则：如果“出发点(from)”在敌人的 ZOC 内，且“目标点(to)”也在敌人的 ZOC 内，或者试图脱离 ZOC
-            // 简单来说：只要出发时身边有敌人，移动就变慢。
-            if (IsInZoneOfControl(from, mover))
+            // 如果 ignorePenalties = true，跳过 ZOC 计算
+            if (!ignorePenalties && IsInZoneOfControl(from, mover))
             {
                 cost += ZOC_PENALTY;
             }
@@ -64,7 +66,6 @@ namespace Game.Grid
             {
                 if (_occupancy.TryGetUnitAt(neighbor, out var unit))
                 {
-                    // 如果旁边站着敌人，则处于 ZOC
                     if (_rules.IsEnemy(friendlyUnit, unit))
                     {
                         return true;

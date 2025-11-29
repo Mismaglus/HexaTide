@@ -14,6 +14,9 @@ namespace Game.UI
 {
     public class SkillTooltipController : MonoBehaviour
     {
+        // 防止第一次 SetActive(true) 触发 Awake 时立刻 Hide 掉
+        private bool _skipHideOnAwake = false;
+
         [Header("Root References")]
         [SerializeField] private GameObject contentRoot;
         [SerializeField] private RectTransform mainRect;
@@ -75,7 +78,7 @@ namespace Game.UI
         void Awake()
         {
             if (mainRect == null) mainRect = GetComponent<RectTransform>();
-            Hide();
+            if (!_skipHideOnAwake) Hide();
         }
 
         public void Show(Ability ability, BattleUnit caster, bool isEnemy, RectTransform slotRect)
@@ -83,29 +86,34 @@ namespace Game.UI
             if (ability == null) return;
 
             // 1. 先激活物体
+            _skipHideOnAwake = true; // 避免第一次被 Awake 隐藏
             gameObject.SetActive(true);
+            _skipHideOnAwake = false;
 
             // 2. 设置位置
             UpdatePosition(slotRect);
 
-            // 3. 设置所有内容 (这会改变文本长度)
+            // 3. 设置所有内容
             UpdateVisuals(ability, isEnemy);
             labelName.text = ability.LocalizedName;
             UpdateCost(ability);
             UpdateInfo(ability);
             UpdateBasicEffect(ability, caster);
             labelDescription.text = ability.GetDynamicDescription(caster);
-
-            // (顺便修复之前的 <style> 问题)
             labelFlavor.text = $"<i>\"{ability.LocalizedFlavor}\"</i>";
-
             UpdateAvailability(ability, caster);
 
-            // 4. ⭐⭐⭐ 关键修复：强制立即刷新布局 ⭐⭐⭐
-            // 解决“第一次显示时因为ContentSizeFitter还没算好大小导致看不见”的问题
+            // 4. ⭐⭐⭐ 关键组合拳：强制刷新布局 ⭐⭐⭐
             if (mainRect != null)
             {
+                // 第一拳：强制 Canvas 更新所有子元素的几何形状 (让 TMP 立即算出文字大小)
+                Canvas.ForceUpdateCanvases();
+
+                // 第二拳：强制 Layout Group 根据子元素大小重新排版
                 LayoutRebuilder.ForceRebuildLayoutImmediate(mainRect);
+
+                // (可选) 第三拳：如果有多层嵌套 Layout，有时需要再来一次以防万一
+                // LayoutRebuilder.ForceRebuildLayoutImmediate(mainRect); 
             }
         }
 

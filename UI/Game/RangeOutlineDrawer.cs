@@ -12,9 +12,13 @@ namespace Game.UI
         public BattleHexGrid grid;
 
         [Header("Appearance")]
-        public Color outlineColor = new Color(0.2f, 0.8f, 1.0f, 1.0f); // 亮青色
+        public Color outlineColor = new Color(0.2f, 0.8f, 1.0f, 1.0f);
         public float width = 0.1f;
         public float yOffset = 0.15f;
+
+        [Header("Rendering Order")]
+        [Tooltip("值越大，显示越靠前 (覆盖在值小的上面)")]
+        public int sortingOrder = 0; // ⭐ 新增：排序层级
 
         private MeshFilter _mf;
         private MeshRenderer _mr;
@@ -43,12 +47,24 @@ namespace Game.UI
             }
         }
 
+#if UNITY_EDITOR
+        // 让编辑器调整数值时实时生效
+        void OnValidate()
+        {
+            if (_mr == null) _mr = GetComponent<MeshRenderer>();
+            if (_mr != null) _mr.sortingOrder = sortingOrder;
+        }
+#endif
+
         public void Show(HashSet<HexCoords> tiles)
         {
             if (!grid || !grid.recipe) return;
             if (tiles == null || tiles.Count == 0) { Hide(); return; }
 
             _mr.enabled = true;
+
+            // ⭐ 强制应用渲染顺序
+            _mr.sortingOrder = sortingOrder;
 
             var recipe = grid.recipe;
             var mask = new HexMask(recipe.width, recipe.height);
@@ -57,7 +73,6 @@ namespace Game.UI
                 if (mask.InBounds(t.q, t.r)) mask[t.q, t.r] = true;
             }
 
-            // 关键：BorderMode.OuterOnly 只画外轮廓
             var mesh = HexBorderMeshBuilder.Build(
                 mask,
                 recipe.outerRadius,

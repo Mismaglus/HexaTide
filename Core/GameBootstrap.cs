@@ -20,7 +20,8 @@ public class GameBootstrap : MonoBehaviour
 
         // 2. 加载 战斗
         yield return SceneManager.LoadSceneAsync(firstBattleSceneName, LoadSceneMode.Additive);
-
+        // 放在 BattleController.Start() 里
+        Game.Localization.LocalizationManager.Get("UI_COOLDOWN"); // 随便取一个Key，强制触发加载
         // 3. 设置活动场景 (为了光照和生成物体的归属)
         var battleScene = SceneManager.GetSceneByName(firstBattleSceneName);
         if (battleScene.IsValid()) SceneManager.SetActiveScene(battleScene);

@@ -26,7 +26,10 @@ namespace Game.Battle.Status
 
         [Header("Timing")]
         [Tooltip("勾选：回合开始时扣除层数/时间（即时消耗）。\n不勾选：回合结束时扣除（延迟消耗）。")]
-        public bool decreaseStackAtStart = true; // ⭐ 新增开关
+        public bool decreaseStackAtStart = true;
+
+        // ⭐ 已移除：public bool isSprintState; 
+        // 现在通过类类型 (SprintStatusDefinition) 来判断，保持基类干净。
 
         [Header("Visuals")]
         public Color effectColor = Color.white;

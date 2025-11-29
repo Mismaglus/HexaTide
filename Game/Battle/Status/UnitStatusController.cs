@@ -10,12 +10,25 @@ namespace Game.Battle.Status
         public List<RuntimeStatus> activeStatuses = new List<RuntimeStatus>();
         private BattleUnit _unit;
 
-        // UI 监听此事件
         public event System.Action OnStatusChanged;
 
-        void Awake() => _unit = GetComponent<BattleUnit>();
+        // ⭐ 核心改动：查询是否有疾跑状态
+        // 现在通过类型判断 (Type Checking) 来识别
+        public bool HasSprintState
+        {
+            get
+            {
+                for (int i = 0; i < activeStatuses.Count; i++)
+                {
+                    // 只要有一个状态是 SprintStatusDefinition (或其子类)
+                    if (activeStatuses[i].Definition is SprintStatusDefinition)
+                        return true;
+                }
+                return false;
+            }
+        }
 
-        // === Public API ===
+        void Awake() => _unit = GetComponent<BattleUnit>();
 
         public void ApplyStatus(StatusDefinition def, BattleUnit source, int stacks = 1)
         {
@@ -25,14 +38,12 @@ namespace Game.Battle.Status
             var existing = activeStatuses.Find(s => s.Definition == def);
             if (existing != null)
             {
-                // 增加指定层数
                 existing.AddStack(def.defaultDuration, stacks);
                 def.OnStackAdded(existing, stacks);
                 Debug.Log($"[Status] Refreshed {def.statusID} on {_unit.name}. Stacks: {existing.Stacks}");
             }
             else
             {
-                // 创建新状态
                 var newStatus = new RuntimeStatus(def, source, stacks);
                 activeStatuses.Add(newStatus);
                 Debug.Log($"[Status] Applied {def.statusID} on {_unit.name}. Stacks: {stacks}");
@@ -51,20 +62,14 @@ namespace Game.Battle.Status
             }
         }
 
-        // === 生命周期钩子 ===
-
         public void OnTurnStart()
         {
-            // 倒序遍历，防止在循环中移除元素导致报错
             for (int i = activeStatuses.Count - 1; i >= 0; i--)
             {
                 var s = activeStatuses[i];
-                // 执行逻辑 (现在 星蚀/月痕 的扣血和减层都在这里)
                 s.Definition.OnTurnStart(s, _unit);
-
                 CheckExpiration(s);
             }
-            // 必须调用，因为层数可能变了
             OnStatusChanged?.Invoke();
         }
 
@@ -73,9 +78,7 @@ namespace Game.Battle.Status
             for (int i = activeStatuses.Count - 1; i >= 0; i--)
             {
                 var s = activeStatuses[i];
-                // 执行逻辑 (夜烬 在这里)
                 s.Definition.OnTurnEnd(s, _unit);
-
                 CheckExpiration(s);
             }
             OnStatusChanged?.Invoke();
@@ -91,7 +94,6 @@ namespace Game.Battle.Status
 
         void CheckExpiration(RuntimeStatus s)
         {
-            // 如果过期 或者 层数归零
             if (s.IsExpired || s.Stacks <= 0)
             {
                 activeStatuses.Remove(s);

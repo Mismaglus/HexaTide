@@ -7,10 +7,10 @@ namespace Game.Grid
     // 地形类型枚举
     public enum HexTerrainType
     {
-        Ground,     // 平地
-        Swamp,      // 沼泽
-        Obstacle,   // 障碍
-        Wall,       // 墙体
+        Ground,     // 平地：消耗 1
+        Swamp,      // 沼泽：消耗 2
+        Obstacle,   // 障碍：阻挡
+        Wall,       // 墙体：阻挡视线
         Pit         // 深坑
     }
 
@@ -58,10 +58,21 @@ namespace Game.Grid
             _mpb = new MaterialPropertyBlock();
         }
 
-        // ⭐ 新增：出生时立刻应用当前的 FogStatus (默认为 Unknown=黑色)
+        // 出生时立刻应用当前的 FogStatus
         private void Start()
         {
             UpdateFogVisuals();
+        }
+
+        // ⭐⭐⭐ 补回丢失的方法：获取移动消耗 ⭐⭐⭐
+        public int GetBaseMoveCost()
+        {
+            switch (terrainType)
+            {
+                case HexTerrainType.Ground: return 1;
+                case HexTerrainType.Swamp: return 2;
+                default: return 999; // 不可通行
+            }
         }
 
         /// <summary>
@@ -69,7 +80,7 @@ namespace Game.Grid
         /// </summary>
         public void SetFogStatus(FogStatus status)
         {
-            if (fogStatus == status) return; // 状态没变就不刷新，节省性能
+            if (fogStatus == status) return;
             fogStatus = status;
             UpdateFogVisuals();
         }

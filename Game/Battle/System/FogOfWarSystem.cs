@@ -44,21 +44,23 @@ namespace Game.Battle
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
         }
 
-        // ⭐ 改为协程：等待 Grid 初始化完成后再计算视野
         IEnumerator Start()
         {
-            // 等待一帧，确保 BattleHexGrid.Update() 里的 Rebuild 已经执行
             yield return null;
 
-            // 监听单位移动
             var allUnits = FindObjectsByType<Unit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var u in allUnits)
             {
                 RegisterUnitEvents(u);
             }
 
-            // 初始计算 (此时 Grid 应该已经生成了 HexCell)
             RefreshFog();
+        }
+
+        // ⭐⭐ 新增 API：查询格子是否可见 ⭐⭐
+        public bool IsTileVisible(HexCoords c)
+        {
+            return _visibleTiles.Contains(c);
         }
 
         void RegisterUnitEvents(Unit u)
@@ -67,7 +69,6 @@ namespace Game.Battle
             u.OnMoveFinished += OnUnitMoveStep;
         }
 
-        // 单位每走一步都会触发
         void OnUnitMoveStep(Unit u, HexCoords from, HexCoords to)
         {
             var bu = u.GetComponent<BattleUnit>();
@@ -75,24 +76,20 @@ namespace Game.Battle
 
             if (bu.isPlayer)
             {
-                // 玩家移动：刷新视野
                 RefreshFog();
             }
             else
             {
-                // 敌人移动：检查是否触发波纹或显隐
                 UpdateEnemyVisibility(bu, from, to);
             }
         }
 
-        // === 核心逻辑：刷新全场迷雾 ===
         public void RefreshFog()
         {
             if (grid == null) return;
 
             _visibleTiles.Clear();
 
-            // 1. 收集所有单位
             var playerUnits = new List<BattleUnit>();
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             _allUnitsCache.Clear();
@@ -103,21 +100,17 @@ namespace Game.Battle
                 if (u.isPlayer) playerUnits.Add(u);
             }
 
-            // 2. 计算视野 (Flood Fill)
             foreach (var pu in playerUnits)
             {
                 int range = 6; // 默认
                 if (pu.Attributes != null) range = pu.Attributes.Optional.SightRange;
 
-                // 计算该单位的视野并合并到总视野
                 var visibleCells = ComputeVisibility(pu.UnitRef.Coords, range);
                 _visibleTiles.UnionWith(visibleCells);
             }
 
-            // 3. 记录已探索
             _visitedTiles.UnionWith(_visibleTiles);
 
-            // 4. 更新所有格子的状态
             foreach (var tile in grid.EnumerateTiles())
             {
                 var cell = tile.GetComponent<HexCell>();
@@ -137,7 +130,6 @@ namespace Game.Battle
                 }
             }
 
-            // 5. 更新所有单位的显隐状态
             var currentVisibleIDs = new HashSet<int>();
 
             foreach (var u in _allUnitsCache)
@@ -156,13 +148,13 @@ namespace Game.Battle
                     if (isVisibleNow)
                     {
                         SetUnitVisible(u, true);
-                        RemoveGhost(u); // 看见本体了，删掉残影
+                        RemoveGhost(u);
                         currentVisibleIDs.Add(uid);
                     }
                     else
                     {
                         SetUnitVisible(u, false);
-                        // 刚丢失视野 -> 生成残影
+                        // 如果刚丢失视野 -> 生成残影
                         if (_visibleUnitIDs.Contains(uid))
                         {
                             CreateGhost(u, u.UnitRef.Coords);
@@ -173,7 +165,6 @@ namespace Game.Battle
             _visibleUnitIDs = currentVisibleIDs;
         }
 
-        // === 敌人移动时的特殊处理 (波纹 & 残影) ===
         void UpdateEnemyVisibility(BattleUnit enemy, HexCoords from, HexCoords to)
         {
             bool toVisible = _visibleTiles.Contains(to);
@@ -191,13 +182,11 @@ namespace Game.Battle
                 SetUnitVisible(enemy, false);
                 _visibleUnitIDs.Remove(uid);
 
-                // 1. 处理残影：如果从可见区域离开，在起点留下残影
                 if (fromVisible)
                 {
                     CreateGhost(enemy, from);
                 }
 
-                // 2. 处理波纹：如果不可见，但处于感知范围内
                 if (IsSensed(to))
                 {
                     if (highlighter) highlighter.TriggerRipple(to);
@@ -205,7 +194,6 @@ namespace Game.Battle
             }
         }
 
-        // 检查是否在感知范围内 (Visible range + Sense Bonus)
         bool IsSensed(HexCoords c)
         {
             foreach (var u in _allUnitsCache)
@@ -217,7 +205,6 @@ namespace Game.Battle
             return false;
         }
 
-        // === 视野计算算法 (BFS with Obstacles) ===
         HashSet<HexCoords> ComputeVisibility(HexCoords center, int range)
         {
             var visible = new HashSet<HexCoords>();
@@ -249,8 +236,6 @@ namespace Game.Battle
             return visible;
         }
 
-        // === 单位显隐与残影 ===
-
         void SetUnitVisible(BattleUnit unit, bool visible)
         {
             var renderers = unit.GetComponentsInChildren<Renderer>(true);
@@ -265,7 +250,6 @@ namespace Game.Battle
             if (ghostPrefab == null) return;
 
             int id = unit.GetInstanceID();
-            // 如果已有残影，移动它
             if (_activeGhosts.TryGetValue(id, out var go))
             {
                 if (go != null)
@@ -275,15 +259,11 @@ namespace Game.Battle
                 }
             }
 
-            // 新建残影
             var newGhost = Instantiate(ghostPrefab, transform);
             newGhost.name = $"Ghost_{unit.name}";
 
-            // 复制 Sprite
             var srcSprite = unit.GetComponentInChildren<SpriteRenderer>();
             var dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>();
-
-            // 如果 Ghost Prefab 自身没有 SpriteRenderer，尝试在子物体找
             if (dstSprite == null) dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>(true);
 
             if (srcSprite && dstSprite)
@@ -292,6 +272,7 @@ namespace Game.Battle
                 dstSprite.flipX = srcSprite.flipX;
 
                 var c = srcSprite.color;
+                // 设置为灰色，表示“记忆”
                 dstSprite.color = new Color(c.r * 0.5f, c.g * 0.5f, c.b * 0.5f, 0.6f);
             }
 

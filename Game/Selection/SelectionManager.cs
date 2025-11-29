@@ -6,7 +6,7 @@ using Game.Common;
 using Game.Units;
 using Game.Grid;
 using Game.UI;
-using Game.Battle.Status; // 引用 Status
+using Game.Battle.Status;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -60,9 +60,6 @@ namespace Game.Battle
         [Header("Data Source")]
         [SerializeField] private GridOccupancy occupancy;
 
-        // 战术消耗常量
-        private const int TACTICAL_AP_COST = 1;
-
         Unit _selectedUnit;
 
         public Unit SelectedUnit
@@ -72,7 +69,6 @@ namespace Game.Battle
             {
                 if (_selectedUnit == value) return;
 
-                // 1. 取消订阅旧单位
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var oldBu))
                 {
                     oldBu.OnResourcesChanged -= HandleUnitResourcesChanged;
@@ -81,7 +77,6 @@ namespace Game.Battle
 
                 _selectedUnit = value;
 
-                // 2. 订阅新单位
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var newBu))
                 {
                     newBu.OnResourcesChanged += HandleUnitResourcesChanged;
@@ -175,46 +170,64 @@ namespace Game.Battle
             }
         }
 
-        // 资源变化回调
         void HandleUnitResourcesChanged() => RecalcRange();
-        // 状态变化回调 (例如开启了疾跑)
         void HandleUnitStatusChanged() => RecalcRange();
 
         void CheckObserverCapability(Unit unit)
         {
             if (outlineManager == null) return;
-
             bool canSeeFuture = false;
             if (unit != null && unit.IsPlayerControlled)
             {
                 if (unit.TryGetComponent<UnitAttributes>(out var attrs))
-                {
                     canSeeFuture = attrs.Optional.CanSeeFutureIntents;
-                }
             }
-
             outlineManager.ToggleFutureVisibility(canSeeFuture);
         }
 
+        // ⭐ 核心修改：获取单位时检查迷雾
         public bool HasUnitAt(HexCoords c)
         {
+            // 如果格子不可见，假装没有单位 (防止选中/悬停)
+            if (FogOfWarSystem.Instance != null && !FogOfWarSystem.Instance.IsTileVisible(c))
+            {
+                return false;
+            }
+
             if (_units.ContainsKey(c)) return true;
             return occupancy != null && occupancy.HasUnitAt(c);
         }
+
         public bool IsEmpty(HexCoords c) => !HasUnitAt(c);
 
+        // ⭐ 核心修改：获取单位时检查迷雾
         public bool TryGetUnitAt(HexCoords c, out Unit u)
         {
-            if (_units.TryGetValue(c, out u)) return true;
-            if (occupancy != null && occupancy.TryGetUnitAt(c, out var occ))
+            // 先获取真实单位
+            bool hasUnit = false;
+            u = null;
+
+            if (_units.TryGetValue(c, out u)) hasUnit = true;
+            else if (occupancy != null && occupancy.TryGetUnitAt(c, out var occ))
             {
                 RemoveUnitMapping(occ);
                 _units[c] = occ;
                 u = occ;
-                return true;
+                hasUnit = true;
             }
-            u = null;
-            return false;
+
+            // 迷雾过滤：如果单位存在但不可见，且不是玩家自己的单位，则视为获取失败
+            if (hasUnit && u != null && FogOfWarSystem.Instance != null)
+            {
+                // 如果单位是敌方，且该格子不可见 -> 返回 False
+                if (!u.IsPlayerControlled && !FogOfWarSystem.Instance.IsTileVisible(c))
+                {
+                    u = null;
+                    return false;
+                }
+            }
+
+            return hasUnit;
         }
 
         void HandleClickOnEmptyTile(HexCoords targetCoords)
@@ -226,7 +239,6 @@ namespace Game.Battle
             if (unit.Coords.Equals(targetCoords)) return;
             if (HasUnitAt(targetCoords)) return;
 
-            // ⭐ 检查：目标是否在可达范围内 (Free Set)
             if (!_currentFreeSet.Contains(targetCoords))
             {
                 Debug.Log("Target out of range.");
@@ -237,16 +249,12 @@ namespace Game.Battle
             if (mover.IsMoving) return;
             if (battleRules == null) return;
 
-            // 1. 检查当前状态 (是否疾跑中)
             var battleUnit = unit.GetComponent<BattleUnit>();
             bool isSprinting = (battleUnit != null && battleUnit.Status != null && battleUnit.Status.HasSprintState);
 
-            // 2. 寻路 (传入状态)
             var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit, isSprinting);
             if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
 
-            // 3. 注入计算器给 UnitMover
-            // 这样 UnitMover 在移动时也会应用无视惩罚的逻辑
             var calculator = new MovementCalculator(occupancy, battleRules);
             var oldProvider = mover.MovementCostProvider;
 
@@ -255,25 +263,16 @@ namespace Game.Battle
                 return calculator.GetMoveCost(from, to, unit, isSprinting);
             };
 
-            // 4. UI 清理
-            if (outlineManager)
-            {
-                outlineManager.ClearMovementRange();
-                outlineManager.ToggleEnemyIntent(false);
-            }
+            if (outlineManager) { outlineManager.ClearMovementRange(); outlineManager.ToggleEnemyIntent(false); }
 
-            // 5. 执行移动
             mover.FollowPath(path, onComplete: () =>
             {
-                // 还原 Provider
                 mover.MovementCostProvider = oldProvider;
 
                 RemoveUnitMapping(unit);
                 _units[unit.Coords] = unit;
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
-
-                // 注意：我们不在这里移除 Sprint 状态，因为它通常是持续一回合的 Buff
 
                 RecalcRange();
                 if (outlineManager) outlineManager.ToggleEnemyIntent(true);
@@ -356,6 +355,8 @@ namespace Game.Battle
             if (targetingSystem != null && targetingSystem.IsTargeting) { if (_hoverCache.HasValue) { _hoverCache = null; highlighter.SetHover(null); if (gridCursor) gridCursor.Hide(); } return; }
             _hoverCache = h;
             Unit unitUnderMouse = null;
+
+            // 获取单位时也会触发迷雾检查，如果不可见会返回 null
             if (h.HasValue) TryGetUnitAt(h.Value, out unitUnderMouse);
 
             if (unitUnderMouse != null) { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorHoverSelectable); }
@@ -396,7 +397,6 @@ namespace Game.Battle
             if (SelectedUnit == u) { _selected = to; highlighter.SetSelected(to); RecalcRange(); }
         }
 
-        // ⭐⭐⭐ 核心修改：基于状态计算范围 ⭐⭐⭐
         void RecalcRange()
         {
             _currentFreeSet.Clear(); _currentCostSet.Clear();
@@ -418,13 +418,7 @@ namespace Game.Battle
                     int ap = attrs.Core.CurrentAP;
 
                     var bu = SelectedUnit.GetComponent<BattleUnit>();
-
-                    // 1. 检查状态
                     bool isSprinting = (bu != null && bu.Status != null && bu.Status.HasSprintState);
-
-                    // 2. 预算计算：
-                    // 如果疾跑中：预算 = Stride + AP (允许把 AP 当步数用，且无视地形/ZOC)
-                    // 如果普通：预算 = Stride (只允许用现有步数，遵循地形/ZOC规则)
                     int maxCost = isSprinting ? (stride + ap) : stride;
 
                     if (maxCost == 0)
@@ -433,7 +427,6 @@ namespace Game.Battle
                         return;
                     }
 
-                    // 3. 调用核心计算
                     var reachable = HexPathfinder.GetReachableCells(center, maxCost, battleRules, SelectedUnit, isSprinting);
 
                     foreach (var kv in reachable)
@@ -444,7 +437,6 @@ namespace Game.Battle
                         _currentFreeSet.Add(center);
                         if (cost == 0) continue;
 
-                        // 全部放入 FreeSet (显示绿色)，因为只要能到达，我们就允许点击
                         _currentFreeSet.Add(pos);
                     }
 
@@ -459,7 +451,6 @@ namespace Game.Battle
                 return;
             }
 
-            // Debug 模式
             if (debugRangeMode != RangeMode.None && _hoverCache.HasValue && outlineManager)
             {
                 var set = new HashSet<HexCoords>();

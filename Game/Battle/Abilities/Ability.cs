@@ -19,6 +19,12 @@ namespace Game.Battle.Abilities
         public string LocalizedName => LocalizationManager.Get($"{abilityID}_NAME");
         public string LocalizedFlavor => LocalizationManager.Get($"{abilityID}_FLAVOR");
 
+        [Header("Behavior")]
+        [Tooltip("勾选后，点击技能图标会立即释放（例如：疾跑、自我治疗），而不会进入选人/选地块模式。")]
+        public bool triggerImmediately = false; // ⭐ 新增开关
+        [Tooltip("即时技能点击后等待的延迟（秒），用于放慢一闪而过的体验。非即时技能忽略。")]
+        [Min(0f)] public float triggerImmediateDelay = 0f;
+
         [Header("Costs")]
         public int apCost = 1;
         [Min(0)] public int mpCost = 0;
@@ -36,12 +42,8 @@ namespace Game.Battle.Abilities
         [Tooltip("-1 代表无限/全图")]
         [Min(-1)] public int aoeRadius = 0;
 
-        // === ⭐ 新增：AOE 形状微调参数 ===
         [Header("Shape Settings")]
-        [Tooltip("仅用于 Cone：扇形角度 (度)。标准战棋通常为 60 或 90。")]
         [Range(30f, 180f)] public float coneAngle = 60f;
-
-        [Tooltip("仅用于 Line：直线宽度 (世界单位)。\n假设六边形半径为1，宽度 1.74 刚好覆盖一列。\n想要打到边缘，尝试设置 2.0 或更大。")]
         [Min(0.1f)] public float lineWidth = 1.0f;
 
         [Header("Target Filtering")]

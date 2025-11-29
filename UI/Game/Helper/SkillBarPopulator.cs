@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -65,6 +66,10 @@ public class SkillBarPopulator : MonoBehaviour
     [Header("Data")]
     public List<Ability> abilities = new List<Ability>(MaxSlots);
 
+    [Header("UI Timing")]
+    [Tooltip("即时技能点击后，延迟多少秒再强制 Button 取消选中/退出。")]
+    public float immediateDeselectDelay = 0.1f;
+
     // Internal State
     struct SlotState { public bool hover; public bool selected; }
     private readonly Dictionary<int, SlotState> _slotStates = new Dictionary<int, SlotState>();
@@ -118,7 +123,8 @@ public class SkillBarPopulator : MonoBehaviour
     public void SetHover(int index, bool on)
     {
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
-        st.hover = on; _slotStates[index] = st;
+        st.hover = on;
+        _slotStates[index] = st;
         UpdateGlowForSlot(index);
 
         // ⭐ Tooltip 触发逻辑
@@ -146,7 +152,8 @@ public class SkillBarPopulator : MonoBehaviour
     {
         if (_isLocked) return;
         if (!_slotStates.TryGetValue(index, out var st)) st = new SlotState();
-        st.selected = on; _slotStates[index] = st;
+        st.selected = on;
+        _slotStates[index] = st;
         UpdateGlowForSlot(index);
     }
 
@@ -280,7 +287,16 @@ public class SkillBarPopulator : MonoBehaviour
         btn.onClick.RemoveAllListeners();
         if (hasSkill && !_isLocked)
         {
-            btn.onClick.AddListener(() => { OnSkillClicked?.Invoke(index); });
+            btn.onClick.AddListener(() =>
+            {
+                OnSkillClicked?.Invoke(index);
+
+                // ⭐ 如果是即时技能，点击后取消 UI 选中状态 (防止按钮一直亮着)
+                if (ability != null && ability.triggerImmediately)
+                {
+                    StartCoroutine(DelayedDeselect(btn, index, immediateDeselectDelay));
+                }
+            });
         }
 
         // ⭐⭐⭐ 核心修复：手动添加 EventTrigger 监听 Hover ⭐⭐⭐
@@ -301,6 +317,28 @@ public class SkillBarPopulator : MonoBehaviour
             entryExit.callback.AddListener((data) => { SetHover(index, false); });
             trigger.triggers.Add(entryExit);
         }
+    }
+
+    IEnumerator DelayedDeselect(Button btn, int index, float delay)
+    {
+        if (delay > 0f)
+            yield return new WaitForSeconds(delay);
+
+        // 清除 Unity 的选中对象，避免 Button 停留在 Selected 状态
+        if (EventSystem.current != null && btn != null)
+        {
+            EventSystem.current.SetSelectedGameObject(null);
+
+            // 主动触发一次 OnDeselect 及 PointerExit，强制按钮回到 Normal/Highlighted 之外的状态
+            var deselectEvt = new BaseEventData(EventSystem.current);
+            btn.OnDeselect(deselectEvt);
+
+            var exitEvt = new PointerEventData(EventSystem.current);
+            btn.OnPointerExit(exitEvt);
+        }
+
+        // 同时清掉我们自定义的 hover，高光和 tooltip 也一起收起
+        SetHover(index, false);
     }
 
     // =========================================================
@@ -378,7 +416,9 @@ public class SkillBarPopulator : MonoBehaviour
         if (st.selected) a += glowSelectedAdd;
         a = Mathf.Clamp01(a);
 
-        var c = glow.color; c.a = a; glow.color = c;
+        var c = glow.color;
+        c.a = a;
+        glow.color = c;
     }
 
     void GetColorsForType(string typeName, out Color tint, out Color outline, out Color shadow, out Color glow, out float baseGlowAlpha)

@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -22,6 +23,10 @@ namespace Game.UI
         [Header("Visuals")]
         public Color activeColor = new Color(1f, 0.8f, 0.2f, 1f);
         public Color inactiveColor = Color.white;
+
+        [Header("UI Timing")]
+        [Tooltip("即时战术动作点击后，延迟多少秒再强制 Button 取消选中/退出。")]
+        public float immediateDeselectDelay = 0.1f;
 
         private Button _btn;
         private SelectionManager _selectionManager;
@@ -62,6 +67,17 @@ namespace Game.UI
         {
             if (_selectionManager != null)
                 _selectionManager.ToggleTacticalAction();
+
+            // 若技能设为即时触发，点击后清理选中状态与 Tooltip，避免按钮卡在 Selected 高亮
+            if (tacticalAbility != null && tacticalAbility.triggerImmediately)
+            {
+                if (tooltipController != null)
+                {
+                    tooltipController.Hide();
+                }
+
+                StartCoroutine(DelayedDeselect());
+            }
         }
 
         void HandleStateChanged(bool isActive)
@@ -93,6 +109,23 @@ namespace Game.UI
             if (tooltipController != null)
             {
                 tooltipController.Hide();
+            }
+        }
+
+        IEnumerator DelayedDeselect()
+        {
+            if (immediateDeselectDelay > 0f)
+                yield return new WaitForSeconds(immediateDeselectDelay);
+
+            if (EventSystem.current != null && _btn != null)
+            {
+                EventSystem.current.SetSelectedGameObject(null);
+
+                var deselectEvt = new BaseEventData(EventSystem.current);
+                _btn.OnDeselect(deselectEvt);
+
+                var exitEvt = new PointerEventData(EventSystem.current);
+                _btn.OnPointerExit(exitEvt);
             }
         }
     }

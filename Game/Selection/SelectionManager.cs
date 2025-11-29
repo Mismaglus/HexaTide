@@ -6,6 +6,7 @@ using Game.Common;
 using Game.Units;
 using Game.Grid;
 using Game.UI;
+using Game.Battle.Status; // 引用 Status
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -59,12 +60,7 @@ namespace Game.Battle
         [Header("Data Source")]
         [SerializeField] private GridOccupancy occupancy;
 
-        // ⭐ 战术动作状态：是否激活了“疾跑/无视惩罚”模式
-        private bool _isTacticalMoveActive = false;
-        public bool IsTacticalMoveActive => _isTacticalMoveActive;
-        public event Action<bool> OnTacticalStateChanged;
-
-        // 战术动作消耗
+        // 战术消耗常量
         private const int TACTICAL_AP_COST = 1;
 
         Unit _selectedUnit;
@@ -76,24 +72,25 @@ namespace Game.Battle
             {
                 if (_selectedUnit == value) return;
 
+                // 1. 取消订阅旧单位
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var oldBu))
                 {
                     oldBu.OnResourcesChanged -= HandleUnitResourcesChanged;
+                    if (oldBu.Status) oldBu.Status.OnStatusChanged -= HandleUnitStatusChanged;
                 }
 
                 _selectedUnit = value;
 
-                // 切换单位时，重置战术状态
-                _isTacticalMoveActive = false;
-                OnTacticalStateChanged?.Invoke(false);
-
+                // 2. 订阅新单位
                 if (_selectedUnit != null && _selectedUnit.TryGetComponent<BattleUnit>(out var newBu))
                 {
                     newBu.OnResourcesChanged += HandleUnitResourcesChanged;
+                    if (newBu.Status) newBu.Status.OnStatusChanged += HandleUnitStatusChanged;
                 }
 
                 OnSelectedUnitChanged?.Invoke(_selectedUnit);
                 CheckObserverCapability(_selectedUnit);
+
                 RecalcRange();
             }
         }
@@ -178,46 +175,24 @@ namespace Game.Battle
             }
         }
 
-        // === ⭐ API: 切换战术动作 (UI 绑定用) ===
-        public void ToggleTacticalAction()
-        {
-            if (SelectedUnit == null) return;
-
-            // 检查是否有足够资源开启
-            var battleUnit = SelectedUnit.GetComponent<BattleUnit>();
-            if (battleUnit != null && battleUnit.CurAP < TACTICAL_AP_COST && !_isTacticalMoveActive)
-            {
-                Debug.Log("Not enough AP for Tactical Sprint!");
-                return;
-            }
-
-            _isTacticalMoveActive = !_isTacticalMoveActive;
-            OnTacticalStateChanged?.Invoke(_isTacticalMoveActive);
-            RecalcRange();
-        }
-
-        public void SetTacticalAction(bool active)
-        {
-            if (_isTacticalMoveActive == active) return;
-            _isTacticalMoveActive = active;
-            OnTacticalStateChanged?.Invoke(_isTacticalMoveActive);
-            RecalcRange();
-        }
-
-        void HandleUnitResourcesChanged()
-        {
-            if (SelectedUnit != null) RecalcRange();
-        }
+        // 资源变化回调
+        void HandleUnitResourcesChanged() => RecalcRange();
+        // 状态变化回调 (例如开启了疾跑)
+        void HandleUnitStatusChanged() => RecalcRange();
 
         void CheckObserverCapability(Unit unit)
         {
             if (outlineManager == null) return;
+
             bool canSeeFuture = false;
             if (unit != null && unit.IsPlayerControlled)
             {
                 if (unit.TryGetComponent<UnitAttributes>(out var attrs))
+                {
                     canSeeFuture = attrs.Optional.CanSeeFutureIntents;
+                }
             }
+
             outlineManager.ToggleFutureVisibility(canSeeFuture);
         }
 
@@ -262,26 +237,22 @@ namespace Game.Battle
             if (mover.IsMoving) return;
             if (battleRules == null) return;
 
-            // 1. 寻路 (传入 _isTacticalMoveActive)
-            var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit, _isTacticalMoveActive);
+            // 1. 检查当前状态 (是否疾跑中)
+            var battleUnit = unit.GetComponent<BattleUnit>();
+            bool isSprinting = (battleUnit != null && battleUnit.Status != null && battleUnit.Status.HasSprintState);
+
+            // 2. 寻路 (传入状态)
+            var path = HexPathfinder.FindPath(unit.Coords, targetCoords, battleRules, unit, isSprinting);
             if (path == null || path.Count == 0) { Debug.Log("无法到达"); return; }
 
-            // 2. 战术动作扣费 (1 AP)
-            // 这里的扣费是作为“开启状态”的代价，而不是步数消耗
-            if (_isTacticalMoveActive)
-            {
-                var bu = unit.GetComponent<BattleUnit>();
-                if (bu != null) bu.TrySpendAP(TACTICAL_AP_COST);
-            }
-
-            // 3. ⭐⭐⭐ 关键修改：注入 MovementCostProvider
-            // 这样 UnitMover 在移动时也会应用无视惩罚的逻辑，从而正确扣除 Stride (1格1步)
+            // 3. 注入计算器给 UnitMover
+            // 这样 UnitMover 在移动时也会应用无视惩罚的逻辑
             var calculator = new MovementCalculator(occupancy, battleRules);
             var oldProvider = mover.MovementCostProvider;
 
             mover.MovementCostProvider = (from, to) =>
             {
-                return calculator.GetMoveCost(from, to, unit, _isTacticalMoveActive);
+                return calculator.GetMoveCost(from, to, unit, isSprinting);
             };
 
             // 4. UI 清理
@@ -302,8 +273,7 @@ namespace Game.Battle
                 _selected = unit.Coords;
                 highlighter.SetSelected(unit.Coords);
 
-                // 移动结束后，自动关闭战术状态
-                SetTacticalAction(false);
+                // 注意：我们不在这里移除 Sprint 状态，因为它通常是持续一回合的 Buff
 
                 RecalcRange();
                 if (outlineManager) outlineManager.ToggleEnemyIntent(true);
@@ -392,7 +362,6 @@ namespace Game.Battle
             else if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
                 HexCoords pos = h.Value;
-                // 只有 FreeSet 是有效的 (CostSet 现在不使用，或者仅作为备用)
                 bool isFree = _currentFreeSet.Contains(pos);
 
                 if (gridCursor) gridCursor.Show(pos, isFree);
@@ -427,7 +396,7 @@ namespace Game.Battle
             if (SelectedUnit == u) { _selected = to; highlighter.SetSelected(to); RecalcRange(); }
         }
 
-        // ⭐⭐⭐ 核心修改：使用真实的 Dijkstra 计算范围 ⭐⭐⭐
+        // ⭐⭐⭐ 核心修改：基于状态计算范围 ⭐⭐⭐
         void RecalcRange()
         {
             _currentFreeSet.Clear(); _currentCostSet.Clear();
@@ -446,8 +415,17 @@ namespace Game.Battle
 
                     HexCoords center = SelectedUnit.Coords;
                     int stride = attrs.Core.CurrentStride;
-                    // 因为不允许 AP 移动，所以预算始终是 Stride
-                    int maxCost = stride;
+                    int ap = attrs.Core.CurrentAP;
+
+                    var bu = SelectedUnit.GetComponent<BattleUnit>();
+
+                    // 1. 检查状态
+                    bool isSprinting = (bu != null && bu.Status != null && bu.Status.HasSprintState);
+
+                    // 2. 预算计算：
+                    // 如果疾跑中：预算 = Stride + AP (允许把 AP 当步数用，且无视地形/ZOC)
+                    // 如果普通：预算 = Stride (只允许用现有步数，遵循地形/ZOC规则)
+                    int maxCost = isSprinting ? (stride + ap) : stride;
 
                     if (maxCost == 0)
                     {
@@ -455,8 +433,8 @@ namespace Game.Battle
                         return;
                     }
 
-                    // ⭐ 传入战术状态：如果是 True，则计算消耗时无视惩罚 (1步1格)，范围自然变大
-                    var reachable = HexPathfinder.GetReachableCells(center, maxCost, battleRules, SelectedUnit, _isTacticalMoveActive);
+                    // 3. 调用核心计算
+                    var reachable = HexPathfinder.GetReachableCells(center, maxCost, battleRules, SelectedUnit, isSprinting);
 
                     foreach (var kv in reachable)
                     {
@@ -466,7 +444,7 @@ namespace Game.Battle
                         _currentFreeSet.Add(center);
                         if (cost == 0) continue;
 
-                        // 因为 maxCost == stride，且我们只搜索到 maxCost，所以所有结果都是 Free
+                        // 全部放入 FreeSet (显示绿色)，因为只要能到达，我们就允许点击
                         _currentFreeSet.Add(pos);
                     }
 
@@ -481,6 +459,7 @@ namespace Game.Battle
                 return;
             }
 
+            // Debug 模式
             if (debugRangeMode != RangeMode.None && _hoverCache.HasValue && outlineManager)
             {
                 var set = new HashSet<HexCoords>();

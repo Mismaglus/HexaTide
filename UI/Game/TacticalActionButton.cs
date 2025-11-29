@@ -37,8 +37,7 @@ namespace Game.UI
             _selectionManager = FindFirstObjectByType<SelectionManager>(FindObjectsInactive.Exclude);
             if (tooltipController == null)
                 tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
-            if (targetingSystem == null)
-                targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
+            ResolveTargetingSystem();
         }
 
         void Start()
@@ -103,10 +102,17 @@ namespace Game.UI
         {
             if (tacticalAbility == null) return;
 
+            // 防守式查找：允许 TargetingSystem 在其他场景/晚于本脚本激活时再获取
+            if (targetingSystem == null) ResolveTargetingSystem();
+
             Debug.Log("[TacticalButton] Triggering Ability via System...");
             if (targetingSystem != null)
             {
                 targetingSystem.EnterTargetingMode(tacticalAbility);
+            }
+            else
+            {
+                Debug.LogWarning("[TacticalButton] 未找到 AbilityTargetingSystem，无法触发技能。请确认战斗场景已加载或场景里有该组件。");
             }
 
             // 强制取消 UI 选中，防止按钮一直亮着
@@ -128,6 +134,12 @@ namespace Game.UI
         public void OnPointerExit(PointerEventData eventData)
         {
             if (tooltipController != null) tooltipController.Hide();
+        }
+
+        void ResolveTargetingSystem()
+        {
+            if (targetingSystem != null) return;
+            targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
         }
     }
 }

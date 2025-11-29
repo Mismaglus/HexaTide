@@ -212,14 +212,16 @@ namespace Game.Battle
             CurrentTurn = side;
 
             // 重置资源，并触发 OnTurnStart (Dot 伤害)
-            foreach (var unit in GetUnitsFor(side))
+            var unitsSnapshot = GetUnitsFor(side).ToArray();
+            foreach (var unit in unitsSnapshot)
             {
                 if (unit) unit.OnTurnStart();
             }
 
             if (notifyActors)
             {
-                foreach (var actor in GetActorsFor(side))
+                var actorsSnapshot = GetActorsFor(side).ToArray();
+                foreach (var actor in actorsSnapshot)
                 {
                     actor?.OnTurnStart();
                 }
@@ -232,8 +234,8 @@ namespace Game.Battle
         // ⭐⭐⭐ 新增：回合结束结算逻辑 ⭐⭐⭐
         void EndCurrentTurn(TurnSide side)
         {
-            var units = GetUnitsFor(side);
-            foreach (var u in units)
+            var unitsSnapshot = GetUnitsFor(side).ToArray();
+            foreach (var u in unitsSnapshot)
             {
                 if (u != null) u.OnTurnEnd(); // 触发 Status.OnTurnEnd (如夜烬扣血)
             }

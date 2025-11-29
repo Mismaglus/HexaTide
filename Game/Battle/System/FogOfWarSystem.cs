@@ -71,8 +71,9 @@ namespace Game.Battle
 
         void OnUnitMoveStep(Unit u, HexCoords from, HexCoords to)
         {
+            if (u == null) return;
             var bu = u.GetComponent<BattleUnit>();
-            if (bu == null) return;
+            if (bu == null || bu.Equals(null)) return; // 已被销毁的单位不处理
 
             if (bu.isPlayer)
             {
@@ -94,6 +95,7 @@ namespace Game.Battle
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             _allUnitsCache.Clear();
             _allUnitsCache.AddRange(allObjs);
+            _allUnitsCache.RemoveAll(x => x == null || x.Equals(null));
 
             foreach (var u in _allUnitsCache)
             {
@@ -134,6 +136,7 @@ namespace Game.Battle
 
             foreach (var u in _allUnitsCache)
             {
+                if (u == null || u.Equals(null)) continue;
                 int uid = u.GetInstanceID();
 
                 if (u.isPlayer)
@@ -167,6 +170,8 @@ namespace Game.Battle
 
         void UpdateEnemyVisibility(BattleUnit enemy, HexCoords from, HexCoords to)
         {
+            if (enemy == null || enemy.Equals(null)) return;
+
             bool toVisible = _visibleTiles.Contains(to);
             bool fromVisible = _visibleTiles.Contains(from);
             int uid = enemy.GetInstanceID();
@@ -198,6 +203,7 @@ namespace Game.Battle
         {
             foreach (var u in _allUnitsCache)
             {
+                if (u == null || u.Equals(null)) continue;
                 if (!u.isPlayer) continue;
                 int range = u.Attributes.Optional.SightRange + senseRangeBonus;
                 if (u.UnitRef.Coords.DistanceTo(c) <= range) return true;

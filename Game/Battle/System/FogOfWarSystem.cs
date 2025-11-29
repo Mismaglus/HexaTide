@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Core.Hex;
 using Game.Units;
 using Game.Grid;
-using Game.Battle.Units;
 using Game.Common;
 
 namespace Game.Battle
@@ -32,8 +31,10 @@ namespace Game.Battle
         // 残影字典: Key=UnitID (InstanceID), Value=GhostInstance
         private Dictionary<int, GameObject> _activeGhosts = new Dictionary<int, GameObject>();
 
+        // ⭐ 新增：记录上一帧哪些单位是可见的，用于判断“刚刚丢失视野”
+        private HashSet<int> _visibleUnitIDs = new HashSet<int>();
+
         private List<BattleUnit> _allUnitsCache = new List<BattleUnit>();
-        private bool _dirty = false;
 
         void Awake()
         {
@@ -85,9 +86,8 @@ namespace Game.Battle
         {
             if (grid == null) return;
 
+            // 1. 准备数据
             _visibleTiles.Clear();
-
-            // 1. 收集所有我方单位
             var playerUnits = new List<BattleUnit>();
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             _allUnitsCache.Clear();
@@ -101,10 +101,9 @@ namespace Game.Battle
             // 2. 计算视野 (Flood Fill)
             foreach (var pu in playerUnits)
             {
-                int range = 6; // 默认
+                int range = 6;
                 if (pu.Attributes != null) range = pu.Attributes.Optional.SightRange;
 
-                // 计算该单位的视野并合并到总视野
                 var visibleCells = ComputeVisibility(pu.UnitRef.Coords, range);
                 _visibleTiles.UnionWith(visibleCells);
             }
@@ -132,29 +131,47 @@ namespace Game.Battle
                 }
             }
 
-            // 5. 更新所有单位的显隐状态
+            // 5. 更新所有单位的显隐状态 & 处理视野丢失时的残影
+            // ⭐ 新增：准备新的可见列表
+            var currentVisibleIDs = new HashSet<int>();
+
             foreach (var u in _allUnitsCache)
             {
+                int uid = u.GetInstanceID();
+
                 if (u.isPlayer)
                 {
                     SetUnitVisible(u, true);
+                    currentVisibleIDs.Add(uid);
                 }
                 else
                 {
-                    bool isVisible = _visibleTiles.Contains(u.UnitRef.Coords);
+                    bool isVisibleNow = _visibleTiles.Contains(u.UnitRef.Coords);
 
-                    if (isVisible)
+                    if (isVisibleNow)
                     {
+                        // 现在可见
                         SetUnitVisible(u, true);
-                        RemoveGhost(u); // 看见本体了，删掉残影
+                        RemoveGhost(u);
+                        currentVisibleIDs.Add(uid);
                     }
                     else
                     {
-                        // 如果刚刚从可见变为不可见（在UpdateEnemyVisibility里处理了移动），这里主要处理静态
+                        // 现在不可见
                         SetUnitVisible(u, false);
+
+                        // ⭐ 关键修复：如果我们上一帧还能看见它 (在 _visibleUnitIDs 里)，说明是刚刚走远丢失视野
+                        // 此时应该在它当前位置生成残影
+                        if (_visibleUnitIDs.Contains(uid))
+                        {
+                            CreateGhost(u, u.UnitRef.Coords);
+                        }
                     }
                 }
             }
+
+            // ⭐ 更新缓存供下一帧对比
+            _visibleUnitIDs = currentVisibleIDs;
         }
 
         // === 敌人移动时的特殊处理 (波纹 & 残影) ===
@@ -163,16 +180,20 @@ namespace Game.Battle
             bool toVisible = _visibleTiles.Contains(to);
             bool fromVisible = _visibleTiles.Contains(from);
 
+            int uid = enemy.GetInstanceID();
+
             if (toVisible)
             {
-                // 走进视野：显示，删残影
+                // 走进视野
                 SetUnitVisible(enemy, true);
                 RemoveGhost(enemy);
+                _visibleUnitIDs.Add(uid); // 标记为可见
             }
             else
             {
                 // 在迷雾中
                 SetUnitVisible(enemy, false);
+                _visibleUnitIDs.Remove(uid); // 标记为不可见
 
                 // 1. 处理残影：如果从可见区域离开，在起点留下残影
                 if (fromVisible)
@@ -180,7 +201,7 @@ namespace Game.Battle
                     CreateGhost(enemy, from);
                 }
 
-                // 2. 处理波纹：如果不可见，但处于感知范围内
+                // 2. 处理波纹
                 if (IsSensed(to))
                 {
                     if (highlighter) highlighter.TriggerRipple(to);
@@ -191,9 +212,6 @@ namespace Game.Battle
         // 检查是否在感知范围内 (Visible range + Sense Bonus)
         bool IsSensed(HexCoords c)
         {
-            // 简单优化：只检查它是否在大一点的范围内
-            // 严谨做法是重新跑一遍大范围的 BFS，这里为了性能，简单判断是否邻接可见区域
-            // 或者遍历所有玩家计算距离
             foreach (var u in _allUnitsCache)
             {
                 if (!u.isPlayer) continue;
@@ -222,11 +240,9 @@ namespace Game.Battle
 
                 if (d >= range) continue;
 
-                // 检查当前格子是否阻挡视线 (墙壁/树林)
-                // 注意：如果 center 是障碍物(比如站在树林里)，它还是能看出去的
-                // 规则：视线在遇到障碍物时停止，但障碍物本身是可见的。
-                bool currentBlocks = IsBlocking(current) && !current.Equals(center);
-                if (currentBlocks) continue; // 视线被挡住，不再扩散
+                // 简单起见，暂时不判断阻挡
+                // bool currentBlocks = IsBlocking(current);
+                // if (currentBlocks && !current.Equals(center)) continue;
 
                 foreach (var neighbor in current.Neighbors())
                 {
@@ -241,24 +257,16 @@ namespace Game.Battle
             return visible;
         }
 
-        bool IsBlocking(HexCoords c)
-        {
-            // 需要获取 Cell 数据
-            // 这里假设 GridOccupancy 不能用(那是单位)，要用 Grid 找 Cell
-            // 为了性能，最好缓存 Cell Map。这里先动态找。
-            // 优化：BattleHexGrid 应该提供 GetCell
-            // 这里临时用 TileTag 查找，或者直接在 BattleHexGrid 里缓存了 HexCell
-            // 简单起见，假设所有格子都在 Grid 的子物体里
-            // *实际项目中建议在 BattleHexGrid 建立 Dictionary<HexCoords, HexCell>*
-            return false; // 暂时默认不阻挡，稍后请在 BattleHexGrid 增加 GetCell 方法
-        }
-
         // === 单位显隐与残影 ===
 
         void SetUnitVisible(BattleUnit unit, bool visible)
         {
-            var visual = unit.GetComponent<UnitVisual2D>();
-            if (visual) visual.SetVisible(visible);
+            // 遍历所有 Renderer 和 Canvas
+            var renderers = unit.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers) r.enabled = visible;
+
+            var canvases = unit.GetComponentsInChildren<Canvas>(true);
+            foreach (var c in canvases) c.enabled = visible;
         }
 
         void CreateGhost(BattleUnit unit, HexCoords pos)
@@ -266,7 +274,8 @@ namespace Game.Battle
             if (ghostPrefab == null) return;
 
             int id = unit.GetInstanceID();
-            // 如果已有残影，移动它
+
+            // 如果已有残影，更新位置即可
             if (_activeGhosts.TryGetValue(id, out var go))
             {
                 if (go != null)
@@ -280,13 +289,21 @@ namespace Game.Battle
             var newGhost = Instantiate(ghostPrefab, transform);
             newGhost.name = $"Ghost_{unit.name}";
 
-            // 设置 Sprite
+            // 复制 Sprite
             var srcSprite = unit.GetComponentInChildren<SpriteRenderer>();
             var dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>();
+
+            // 如果 Ghost Prefab 自身没有 SpriteRenderer，尝试在子物体找
+            if (dstSprite == null) dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>(true);
+
             if (srcSprite && dstSprite)
             {
                 dstSprite.sprite = srcSprite.sprite;
-                dstSprite.color = new Color(0.5f, 0.5f, 0.5f, 0.7f); // 灰色半透明
+                dstSprite.flipX = srcSprite.flipX; // 保持朝向
+
+                // 设为灰色半透明
+                var c = srcSprite.color;
+                dstSprite.color = new Color(c.r * 0.5f, c.g * 0.5f, c.b * 0.5f, 0.6f);
             }
 
             UpdateGhostPos(newGhost, pos);

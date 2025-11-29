@@ -4,27 +4,22 @@ using Game.Common;
 
 namespace Game.Grid
 {
-    // 地形类型枚举
     public enum HexTerrainType
     {
-        Ground,     // 平地：消耗 1
-        Swamp,      // 沼泽：消耗 2 (限制风筝)
-        Obstacle,   // 障碍：阻挡移动和视线
-        Wall,       // 墙体：阻挡移动和视线，可被破坏
-        Pit         // 深坑：阻挡地面单位，飞行可过
+        Ground,
+        Swamp,
+        Obstacle,
+        Wall,
+        Pit
     }
 
-    // 迷雾状态枚举
     public enum FogStatus
     {
-        Unknown,    // 未探索 (黑雾) - 完全不可见
-        Ghost,      // 记忆中 (残影) - 地形可见，单位不可见（显示残影）
-        Visible     // 可见 - 实时视野
+        Unknown,    // 黑雾
+        Ghost,      // 残影 (灰)
+        Visible     // 可见
     }
 
-    /// <summary>
-    /// 存储单个六边形格子的逻辑数据 (地形、迷雾、阻挡等)
-    /// </summary>
     [DisallowMultipleComponent]
     public class HexCell : MonoBehaviour
     {
@@ -37,18 +32,13 @@ namespace Game.Grid
         [Header("Fog State")]
         public FogStatus fogStatus = FogStatus.Unknown;
 
-        // 缓存渲染器用于变色
         private MeshRenderer _meshRenderer;
         private MaterialPropertyBlock _mpb;
-        private static readonly int ColorPropID = Shader.PropertyToID("_BaseColor"); // URP Lit
-        private static readonly int TintPropID = Shader.PropertyToID("_Color");      // Standard/Unlit
+        private static readonly int ColorPropID = Shader.PropertyToID("_BaseColor");
+        private static readonly int TintPropID = Shader.PropertyToID("_Color");
 
-        // 当前地形是否阻挡视线
         public bool BlocksSight => terrainType == HexTerrainType.Obstacle || terrainType == HexTerrainType.Wall;
-
-        // 当前地形是否可行走
         public bool IsTerrainWalkable => terrainType != HexTerrainType.Obstacle && terrainType != HexTerrainType.Wall;
-
         public HexCoords Coords => tileTag != null ? tileTag.Coords : default;
 
         private void Awake()
@@ -58,9 +48,16 @@ namespace Game.Grid
             _mpb = new MaterialPropertyBlock();
         }
 
-        /// <summary>
-        /// 更新迷雾状态并改变格子的视觉表现
-        /// </summary>
+        public int GetBaseMoveCost()
+        {
+            switch (terrainType)
+            {
+                case HexTerrainType.Ground: return 1;
+                case HexTerrainType.Swamp: return 2;
+                default: return 999;
+            }
+        }
+
         public void SetFogStatus(FogStatus status)
         {
             fogStatus = status;
@@ -78,17 +75,16 @@ namespace Game.Grid
             switch (fogStatus)
             {
                 case FogStatus.Visible:
-                    targetColor = Color.white; // 原色
+                    targetColor = Color.white;
                     break;
                 case FogStatus.Ghost:
-                    targetColor = new Color(0.5f, 0.5f, 0.6f, 1f); // 灰色/暗淡
+                    targetColor = new Color(0.5f, 0.5f, 0.6f, 1f); // 变灰
                     break;
                 case FogStatus.Unknown:
-                    targetColor = Color.black; // 纯黑 (或者你可以选择禁用 Renderer)
+                    targetColor = Color.black; // 变黑
                     break;
             }
 
-            // 兼容不同的 Shader 属性名
             _mpb.SetColor(ColorPropID, targetColor);
             _mpb.SetColor(TintPropID, targetColor);
 

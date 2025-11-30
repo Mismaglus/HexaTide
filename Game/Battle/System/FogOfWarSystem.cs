@@ -9,7 +9,8 @@ using Game.Common;
 namespace Game.Battle
 {
     /// <summary>
-    /// 战争迷雾系统：负责视野计算、单位显隐、残影和波纹感知。
+    /// 战争迷雾系统：负责视野计算、单位显隐和波纹感知。
+    /// (已移除单位残影/Ghost逻辑，仅保留地形记忆和波纹)
     /// </summary>
     public class FogOfWarSystem : MonoBehaviour
     {
@@ -19,28 +20,15 @@ namespace Game.Battle
         public BattleHexGrid grid;
         public GridOccupancy occupancy;
         public HexHighlighter highlighter;
-        private BattleStateMachine _sm;
 
         [Header("Config")]
-        [Tooltip("如果单位未配置 SenseRangeBonus，则使用此默认值。")]
-        public int defaultSenseRangeBonus = 2;
-
-        [Tooltip("Ghost Prefab: 一个简单的带SpriteRenderer的物体，用于显示敌人残影")]
-        public GameObject ghostPrefab;
+        public int senseRangeBonus = 2; // 感知范围 = 视野 + 2
 
         // --- Runtime Data ---
         private HashSet<HexCoords> _visibleTiles = new HashSet<HexCoords>();
         private HashSet<HexCoords> _visitedTiles = new HashSet<HexCoords>();
-        private HashSet<HexCoords> _sensedArea = new HashSet<HexCoords>(); // 新增：感知范围区域
-
-        // 残影字典
-        private Dictionary<int, GameObject> _activeGhosts = new Dictionary<int, GameObject>();
-        // 可见单位缓存
-        private HashSet<int> _visibleUnitIDs = new HashSet<int>();
 
         private List<BattleUnit> _allUnitsCache = new List<BattleUnit>();
-        private readonly HashSet<HexCoords> _sensedTilesThisTurn = new HashSet<HexCoords>();
-        private readonly HashSet<UnitMover> _hookedMovers = new HashSet<UnitMover>();
 
         void Awake()
         {
@@ -48,11 +36,11 @@ namespace Game.Battle
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
             if (!occupancy) occupancy = FindFirstObjectByType<GridOccupancy>();
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
-            _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
         IEnumerator Start()
         {
+            // 等待一帧，确保 Grid 生成完毕
             yield return null;
 
             var allUnits = FindObjectsByType<Unit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
@@ -62,36 +50,16 @@ namespace Game.Battle
             }
 
             RefreshFog();
-
-            if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged;
         }
 
-        void OnDestroy()
-        {
-            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
-        }
-
-        void HandleTurnChanged(TurnSide side)
-        {
-            if (side == TurnSide.Enemy)
-            {
-                _sensedTilesThisTurn.Clear();
-                if (highlighter) highlighter.SetSensedTiles(null);
-            }
-            else if (side == TurnSide.Player)
-            {
-                // 切回玩家回合时，展示上一敌人回合感知到的位置
-                if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
-            }
-        }
-
-        // ⭐⭐ 新增 API：查询格子是否可见 ⭐⭐
+        // API：查询格子是否可见 (用于交互限制，如禁止选中不可见单位)
         public bool IsTileVisible(HexCoords c)
         {
             return _visibleTiles.Contains(c);
         }
 
-        public bool IsTileKnown(HexCoords c)
+        // API：查询格子是否已探索 (用于 UI 过滤，如只显示已探索区域的攻击预警)
+        public bool IsTileExplored(HexCoords c)
         {
             return _visibleTiles.Contains(c) || _visitedTiles.Contains(c);
         }
@@ -100,66 +68,57 @@ namespace Game.Battle
         {
             u.OnMoveFinished -= OnUnitMoveStep;
             u.OnMoveFinished += OnUnitMoveStep;
-
-            var mover = u.GetComponent<UnitMover>();
-            if (mover != null && !_hookedMovers.Contains(mover))
-            {
-                mover.OnPathCompleted += () => HandlePathCompleted(u);
-                _hookedMovers.Add(mover);
-            }
         }
 
         void OnUnitMoveStep(Unit u, HexCoords from, HexCoords to)
         {
-            if (u == null) return;
             var bu = u.GetComponent<BattleUnit>();
-            if (bu == null || bu.Equals(null)) return; // 已被销毁的单位不处理
+            if (bu == null) return;
 
             if (bu.isPlayer)
             {
+                // 玩家移动：刷新全场视野
                 RefreshFog();
             }
             else
             {
+                // 敌人移动：只更新显隐和波纹
                 UpdateEnemyVisibility(bu, from, to);
             }
         }
 
+        // === 核心逻辑：刷新全场迷雾 ===
         public void RefreshFog()
         {
             if (grid == null) return;
 
             _visibleTiles.Clear();
-            _sensedArea.Clear();
-            _sensedTilesThisTurn.Clear();
 
+            // 1. 收集单位
             var playerUnits = new List<BattleUnit>();
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             _allUnitsCache.Clear();
             _allUnitsCache.AddRange(allObjs);
-            _allUnitsCache.RemoveAll(x => x == null || x.Equals(null));
 
             foreach (var u in _allUnitsCache)
             {
                 if (u.isPlayer) playerUnits.Add(u);
             }
 
+            // 2. 计算玩家视野
             foreach (var pu in playerUnits)
             {
-                int sight = GetSight(pu);
-                int sense = sight + GetSenseBonus(pu);
+                int range = 6;
+                if (pu.Attributes != null) range = pu.Attributes.Optional.SightRange;
 
-                // 视野决定可见格子
-                var visibleCells = ComputeVisibility(pu.UnitRef.Coords, sight);
+                var visibleCells = ComputeVisibility(pu.UnitRef.Coords, range);
                 _visibleTiles.UnionWith(visibleCells);
-
-                // 感知决定模糊格子
-                var sensedCells = ComputeVisibility(pu.UnitRef.Coords, sense);
-                _sensedArea.UnionWith(sensedCells);
             }
 
             _visitedTiles.UnionWith(_visibleTiles);
 
+            // 3. 更新地形迷雾状态 (Visible / Ghost / Unknown)
+            // 地形依然保留 Ghost 状态(变灰)，代表"我去过这里，我知道这里是墙还是地"
             foreach (var tile in grid.EnumerateTiles())
             {
                 var cell = tile.GetComponent<HexCell>();
@@ -168,16 +127,6 @@ namespace Game.Battle
                 if (_visibleTiles.Contains(cell.Coords))
                 {
                     cell.SetFogStatus(FogStatus.Visible);
-                }
-                else if (_sensedArea.Contains(cell.Coords) && !_visitedTiles.Contains(cell.Coords))
-                {
-                    // 在感知范围内，且未被探索过 -> Sensed (浅灰)
-                    // 如果已经探索过 (Ghost)，通常保持 Ghost 更好，或者你想让 Sensed 覆盖 Ghost？
-                    // 这里假设 Sensed 优先级高于 Unknown，但低于 Ghost (因为 Ghost 包含地形信息)
-                    // 但用户说 "sensed range blocks should have a light gray color"，可能希望 Sensed 覆盖 Unknown
-                    // 如果是 Ghost，已经是灰色了。
-                    // 让我们把 Sensed 仅用于 Unknown 区域的“点亮”
-                    cell.SetFogStatus(FogStatus.Sensed);
                 }
                 else if (_visitedTiles.Contains(cell.Coords))
                 {
@@ -189,86 +138,38 @@ namespace Game.Battle
                 }
             }
 
-            var currentVisibleIDs = new HashSet<int>();
-
+            // 4. 更新单位显隐
             foreach (var u in _allUnitsCache)
             {
-                if (u == null || u.Equals(null)) continue;
-                int uid = u.GetInstanceID();
-
                 if (u.isPlayer)
                 {
                     SetUnitVisible(u, true);
-                    currentVisibleIDs.Add(uid);
                 }
                 else
                 {
+                    // 简单粗暴：如果在视野里就显示，不在就隐藏
                     bool isVisibleNow = _visibleTiles.Contains(u.UnitRef.Coords);
-
-                    if (isVisibleNow)
-                    {
-                        SetUnitVisible(u, true);
-                        RemoveGhost(u);
-                        currentVisibleIDs.Add(uid);
-                    }
-                    else
-                    {
-                        SetUnitVisible(u, false);
-                        // 如果刚丢失视野 -> 生成残影
-                        if (_visibleUnitIDs.Contains(uid))
-                        {
-                            CreateGhost(u, u.UnitRef.Coords);
-                        }
-                    }
+                    SetUnitVisible(u, isVisibleNow);
                 }
             }
-            _visibleUnitIDs = currentVisibleIDs;
-
-            // 重新计算感知：不可见但在感知范围内的敌人终点
-            foreach (var enemy in _allUnitsCache)
-            {
-                if (enemy == null || enemy.Equals(null)) continue;
-                if (enemy.isPlayer) continue;
-                if (_visibleTiles.Contains(enemy.UnitRef.Coords)) continue;
-
-                foreach (var pu in playerUnits)
-                {
-                    int senseRange = GetSight(pu) + GetSenseBonus(pu);
-                    if (pu.UnitRef.Coords.DistanceTo(enemy.UnitRef.Coords) <= senseRange)
-                    {
-                        _sensedTilesThisTurn.Add(enemy.UnitRef.Coords);
-                        break;
-                    }
-                }
-            }
-
-            if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
         }
 
+        // === 敌人移动时的特殊处理 (波纹) ===
         void UpdateEnemyVisibility(BattleUnit enemy, HexCoords from, HexCoords to)
         {
-            if (enemy == null || enemy.Equals(null)) return;
-
             bool toVisible = _visibleTiles.Contains(to);
-            bool fromVisible = _visibleTiles.Contains(from);
-            int uid = enemy.GetInstanceID();
 
             if (toVisible)
             {
+                // 走进视野 -> 显形
                 SetUnitVisible(enemy, true);
-                RemoveGhost(enemy);
-                _visibleUnitIDs.Add(uid);
             }
             else
             {
+                // 走进迷雾 -> 隐形
                 SetUnitVisible(enemy, false);
-                _visibleUnitIDs.Remove(uid);
 
-                if (fromVisible)
-                {
-                    CreateGhost(enemy, from);
-                }
-
+                // 触发波纹：如果在视野外但在感知内
                 if (IsSensed(to))
                 {
                     if (highlighter) highlighter.TriggerRipple(to);
@@ -276,43 +177,19 @@ namespace Game.Battle
             }
         }
 
-        void HandlePathCompleted(Unit u)
-        {
-            if (u == null || u.Equals(null)) return;
-            var bu = u.GetComponent<BattleUnit>();
-            if (bu == null || bu.Equals(null)) return;
-
-            // 移动结束后刷新一次迷雾/感知，确保范围与状态及时更新
-            RefreshFog();
-        }
-
+        // 检查是否在感知范围内 (Visible range + Sense Bonus)
         bool IsSensed(HexCoords c)
         {
             foreach (var u in _allUnitsCache)
             {
-                if (u == null || u.Equals(null)) continue;
                 if (!u.isPlayer) continue;
-                int range = GetSight(u) + GetSenseBonus(u);
+                int range = u.Attributes.Optional.SightRange + senseRangeBonus;
                 if (u.UnitRef.Coords.DistanceTo(c) <= range) return true;
             }
             return false;
         }
 
-        int GetSight(BattleUnit u)
-        {
-            if (u == null) return 0;
-            if (u.Attributes != null) return u.Attributes.Optional.SightRange;
-            return 0;
-        }
-
-        int GetSenseBonus(BattleUnit u)
-        {
-            if (u == null) return defaultSenseRangeBonus;
-            if (u.Attributes == null) return defaultSenseRangeBonus;
-            int b = u.Attributes.Optional.SenseRangeBonus;
-            return b > 0 ? b : defaultSenseRangeBonus;
-        }
-
+        // === 视野计算算法 (BFS) ===
         HashSet<HexCoords> ComputeVisibility(HexCoords center, int range)
         {
             var visible = new HashSet<HexCoords>();
@@ -331,6 +208,8 @@ namespace Game.Battle
 
                 if (d >= range) continue;
 
+                // 暂时不计算地形阻挡 (BlocksSight)，如果以后有墙壁再加
+
                 foreach (var neighbor in current.Neighbors())
                 {
                     if (distances.ContainsKey(neighbor)) continue;
@@ -344,6 +223,7 @@ namespace Game.Battle
             return visible;
         }
 
+        // === 单位显隐控制 ===
         void SetUnitVisible(BattleUnit unit, bool visible)
         {
             var renderers = unit.GetComponentsInChildren<Renderer>(true);
@@ -351,59 +231,6 @@ namespace Game.Battle
 
             var canvases = unit.GetComponentsInChildren<Canvas>(true);
             foreach (var c in canvases) c.enabled = visible;
-        }
-
-        void CreateGhost(BattleUnit unit, HexCoords pos)
-        {
-            if (ghostPrefab == null) return;
-
-            int id = unit.GetInstanceID();
-            if (_activeGhosts.TryGetValue(id, out var go))
-            {
-                if (go != null)
-                {
-                    UpdateGhostPos(go, pos);
-                    return;
-                }
-            }
-
-            var newGhost = Instantiate(ghostPrefab, transform);
-            newGhost.name = $"Ghost_{unit.name}";
-
-            var srcSprite = unit.GetComponentInChildren<SpriteRenderer>();
-            var dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>();
-            if (dstSprite == null) dstSprite = newGhost.GetComponentInChildren<SpriteRenderer>(true);
-
-            if (srcSprite && dstSprite)
-            {
-                dstSprite.sprite = srcSprite.sprite;
-                dstSprite.flipX = srcSprite.flipX;
-
-                var c = srcSprite.color;
-                // 设置为灰色，表示“记忆”
-                dstSprite.color = new Color(c.r * 0.5f, c.g * 0.5f, c.b * 0.5f, 0.6f);
-            }
-
-            UpdateGhostPos(newGhost, pos);
-            _activeGhosts[id] = newGhost;
-        }
-
-        void RemoveGhost(BattleUnit unit)
-        {
-            int id = unit.GetInstanceID();
-            if (_activeGhosts.TryGetValue(id, out var go))
-            {
-                if (go != null) Destroy(go);
-                _activeGhosts.Remove(id);
-            }
-        }
-
-        void UpdateGhostPos(GameObject ghost, HexCoords c)
-        {
-            if (grid != null)
-            {
-                ghost.transform.position = grid.GetTileWorldPosition(c);
-            }
         }
     }
 }

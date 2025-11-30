@@ -6,7 +6,7 @@ using Game.Units;
 using Game.Battle.AI;
 using Game.Battle.Abilities;
 using Game.Grid;
-using Game.Common; // 引用 HexHighlighter
+using Game.Common;
 
 namespace Game.Battle
 {
@@ -16,22 +16,20 @@ namespace Game.Battle
 
         [Header("Visuals")]
         public GridOutlineManager outlineManager;
-        public HexHighlighter highlighter; // ⭐ 必须引用这个才能让地板变色
-        public FogOfWarSystem fog;
+        public HexHighlighter highlighter;
 
         private List<EnemyBrain> _enemies = new List<EnemyBrain>();
         private BattleStateMachine _sm;
 
-        // 缓存计算结果
         private HashSet<HexCoords> _dangerZone = new();
+        private HashSet<HexCoords> _filteredDangerZone = new();
         private List<(Vector3, Vector3)> _arrowList = new();
 
         void Awake()
         {
             Instance = this;
             if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>();
-            if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(); // 自动查找
-            if (!fog) fog = FindFirstObjectByType<FogOfWarSystem>();
+            if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
             _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
@@ -49,10 +47,7 @@ namespace Game.Battle
             }
             else
             {
-                // 敌人回合开始，隐藏所有意图提示
                 if (outlineManager) outlineManager.SetEnemyIntent(null, null);
-
-                // ⭐ 清除地板高亮
                 if (highlighter) highlighter.SetEnemyDanger(null);
             }
         }
@@ -72,9 +67,6 @@ namespace Game.Battle
         {
             if (_sm != null && _sm.CurrentTurn != TurnSide.Player) return;
 
-            // 即使没有 outlineManager 也要跑计算，因为可能需要 highlighter
-            // if (!outlineManager) return; 
-
             _dangerZone.Clear();
             _arrowList.Clear();
 
@@ -90,18 +82,12 @@ namespace Game.Battle
                     if (plan.ability != null)
                     {
                         var enemyUnit = enemy.GetComponent<Unit>();
-
-                        // ⭐ 修正：使用计划中的移动终点 (moveDest) 作为施法原点
-                        // 这样如果怪物是“移动后攻击”，扇形/直线会从新位置发出
+                        // AI 计划中的移动终点
                         HexCoords castOrigin = plan.moveDest;
 
                         var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability, castOrigin);
-                        foreach (var cell in area)
-                        {
-                            // 只对玩家“已知”(Visible/Ghost)的格子显示红框，避免探雾
-                            if (fog != null && !fog.IsTileKnown(cell)) continue;
-                            _dangerZone.Add(cell);
-                        }
+
+                        _dangerZone.UnionWith(area);
 
                         if (!plan.targetCell.Equals(enemyUnit.Coords))
                         {
@@ -113,12 +99,28 @@ namespace Game.Battle
                 }
             }
 
-            // 1. 更新红圈和箭头 (GridOutlineManager)
-            if (outlineManager) outlineManager.SetEnemyIntent(_dangerZone, _arrowList);
+            // 过滤：只显示已探索区域的红框
+            _filteredDangerZone.Clear();
+            if (FogOfWarSystem.Instance != null)
+            {
+                foreach (var t in _dangerZone)
+                {
+                    // ⭐ 修复：使用正确的方法名 IsTileExplored
+                    if (FogOfWarSystem.Instance.IsTileExplored(t))
+                    {
+                        _filteredDangerZone.Add(t);
+                    }
+                }
+            }
+            else
+            {
+                // 如果没有迷雾系统，全显
+                _filteredDangerZone.UnionWith(_dangerZone);
+            }
 
-            // 2. ⭐⭐⭐ 更新地板红色高亮 (HexHighlighter)
-            // 这就是之前缺少的关键一步！
-            if (highlighter) highlighter.SetEnemyDanger(_dangerZone);
+            // 更新 UI
+            if (outlineManager) outlineManager.SetEnemyIntent(_filteredDangerZone, _arrowList);
+            if (highlighter) highlighter.SetEnemyDanger(_filteredDangerZone);
         }
     }
 }

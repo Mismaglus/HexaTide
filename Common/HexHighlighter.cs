@@ -2,13 +2,12 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
-using Game.Grid; // 引用 HexCell
+using Game.Grid; // 脪媒脫脙 HexCell
 
 namespace Game.Common
 {
     /// <summary>
-    /// 增强版高亮器：统一管理格子颜色，包括高亮、波纹以及迷雾状态的视觉表现。
-    /// 解决了 Highlighter 和 HexCell 抢夺 Renderer 控制权导致的迷雾闪烁/波纹不可见问题。
+    /// 脭枚脟驴掳忙赂脽脕脕脝梅拢潞脨脼赂麓虏篓脦脝脭脷虏禄脥赂脙梅 Shader 脧脗脦脼路篓脡脕脣赂碌脛脦脢脤芒隆拢
     /// </summary>
     [DisallowMultipleComponent]
     public class HexHighlighter : MonoBehaviour
@@ -31,11 +30,12 @@ namespace Game.Common
         public Color moveCostColor = new Color(1.0f, 0.8f, 0.0f, 0.15f);
 
         [Header("FX Colors")]
-        public Color rippleColor = new Color(1f, 0.0f, 0.0f, 0.8f); // 波纹颜色 (红)
+        public Color rippleColor = new Color(1f, 0.2f, 0.2f, 1f); // 陆篓脪茅脡猫脦陋脕脕潞矛脡芦拢卢Alpha=1
+        public Color sensedColor = new Color(1f, 0.5f, 0.2f, 0.35f); // 录脿脰脴碌陆碌脛碌脨脠脣禄卯露炉脟酶脫貌
 
         [Header("Fog Colors")]
-        public Color fogUnknownColor = Color.black;               // 黑雾颜色
-        public Color fogGhostColor = new Color(0.5f, 0.5f, 0.6f, 1f); // 记忆迷雾颜色
+        public Color fogUnknownColor = Color.black;
+        public Color fogGhostColor = new Color(0.5f, 0.5f, 0.6f, 1f);
 
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
@@ -66,6 +66,7 @@ namespace Game.Common
         readonly HashSet<HexCoords> _enemyDanger = new();
         readonly HashSet<HexCoords> _moveFree = new();
         readonly HashSet<HexCoords> _moveCost = new();
+        readonly HashSet<HexCoords> _sensed = new(); // 卤戮禄路潞贸脛脷录脿脰脴碌陆碌脛碌脨脠脣禄卯露炉
 
         private Dictionary<HexCoords, float> _activeRipples = new Dictionary<HexCoords, float>();
 
@@ -145,9 +146,12 @@ namespace Game.Common
 
         public void TriggerRipple(HexCoords c, float duration = 0.5f)
         {
-            if (!_slots.ContainsKey((c.q, c.r))) return;
-            _activeRipples[c] = duration;
-            Repaint(c.q, c.r);
+            // 脰禄脫脨碌卤赂帽脳脫麓忙脭脷脢卤虏脜麓楼路垄
+            if (_slots.ContainsKey((c.q, c.r)))
+            {
+                _activeRipples[c] = duration;
+                Repaint(c.q, c.r);
+            }
         }
 
         public void SetHover(HexCoords? c) { var o = _hover; _hover = c; revertPaintHelper(o); Repaint(_hover); }
@@ -180,17 +184,21 @@ namespace Game.Common
             foreach (var x in old) if (!_enemyDanger.Contains(x)) Repaint(x.q, x.r); foreach (var x in _enemyDanger) if (!old.Contains(x)) Repaint(x.q, x.r);
         }
 
+        public void SetSensedTiles(IEnumerable<HexCoords> c)
+        {
+            var old = new HashSet<HexCoords>(_sensed); _sensed.Clear(); if (c != null) foreach (var x in c) _sensed.Add(x);
+            foreach (var x in old) if (!_sensed.Contains(x)) Repaint(x.q, x.r); foreach (var x in _sensed) if (!old.Contains(x)) Repaint(x.q, x.r);
+        }
+
         public void ClearAll()
         {
             var t = new HashSet<HexCoords>();
             if (_hover.HasValue) t.Add(_hover.Value); if (_selected.HasValue) t.Add(_selected.Value);
             foreach (var x in _range) t.Add(x); foreach (var x in _impact) t.Add(x); foreach (var x in _enemyDanger) t.Add(x);
-            foreach (var x in _moveFree) t.Add(x); foreach (var x in _moveCost) t.Add(x);
-            _hover = null; _selected = null; _range.Clear(); _impact.Clear(); _enemyDanger.Clear(); _moveFree.Clear(); _moveCost.Clear(); _activeRipples.Clear();
+            foreach (var x in _moveFree) t.Add(x); foreach (var x in _moveCost) t.Add(x); foreach (var x in _sensed) t.Add(x);
+            _hover = null; _selected = null; _range.Clear(); _impact.Clear(); _enemyDanger.Clear(); _moveFree.Clear(); _moveCost.Clear(); _sensed.Clear(); _activeRipples.Clear();
             foreach (var x in t) ClearPaint(x);
         }
-
-        // === Painting Logic ===
 
         void revertPaintHelper(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
         void Repaint(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
@@ -202,6 +210,7 @@ namespace Game.Common
             foreach (var v in _range) Repaint(v.q, v.r); foreach (var v in _impact) Repaint(v.q, v.r);
             foreach (var v in _enemyDanger) Repaint(v.q, v.r); foreach (var v in _moveFree) Repaint(v.q, v.r);
             foreach (var v in _moveCost) Repaint(v.q, v.r); foreach (var v in _activeRipples.Keys) Repaint(v.q, v.r);
+            foreach (var v in _sensed) Repaint(v.q, v.r);
         }
 
         void Repaint(int q, int r)
@@ -211,11 +220,9 @@ namespace Game.Common
 
             var coord = new HexCoords(q, r);
 
-            // 0. 获取迷雾状态
             FogStatus fog = FogStatus.Visible;
             if (slot.cell != null) fog = slot.cell.fogStatus;
 
-            // 1. 获取所有高亮标记状态
             bool isRipple = _activeRipples.ContainsKey(coord);
             bool inImpact = _impact.Contains(coord);
             bool isSelected = _selected.HasValue && _selected.Value.Equals(coord);
@@ -224,42 +231,58 @@ namespace Game.Common
             bool inFree = _moveFree.Contains(coord);
             bool inCost = _moveCost.Contains(coord);
             bool inRange = _range.Contains(coord);
+            bool inSensed = _sensed.Contains(coord);
 
             Color finalColor = Color.clear;
             bool shouldPaint = false;
 
-            // ??? 核心逻辑重写：统一处理迷雾与高亮的优先级 ???
+            // --- 脗脽录颅脨脼脮媒拢潞禄矛潞脧录脝脣茫 ---
 
-            // Case A: 未知区域 (黑雾)
-            // 规则：除非有波纹，否则强制黑色，不显示任何其他高亮
             if (fog == FogStatus.Unknown)
             {
                 if (isRipple)
                 {
-                    float alphaMult = Mathf.PingPong(Time.time * 10f, 1f);
-                    finalColor = rippleColor;
-                    finalColor.a *= alphaMult;
+                    float t = Mathf.PingPong(Time.time * 8f, 1f);
+                    finalColor = Color.Lerp(fogUnknownColor, rippleColor, t);
+                    shouldPaint = true;
+                }
+                else if (inSensed)
+                {
+                    finalColor = sensedColor;
                     shouldPaint = true;
                 }
                 else
                 {
-                    finalColor = fogUnknownColor; // 强制黑
+                    finalColor = fogUnknownColor;
                     shouldPaint = true;
                 }
             }
-            // Case B: 记忆区域 (灰雾) & 可见区域
-            // 规则：正常显示高亮，如果无高亮，Ghost 区域显示灰色
-            else
+            else // Ghost or Visible
             {
-                // 高亮优先级判断
+                // 脮媒鲁拢碌脛脫脜脧脠录露脗脽录颅
                 if (isRipple)
                 {
-                    float alphaMult = Mathf.PingPong(Time.time * 10f, 1f);
-                    finalColor = rippleColor;
-                    finalColor.a *= alphaMult;
+                    float t = Mathf.PingPong(Time.time * 8f, 1f);
+                    // 露脭脫脷驴脡录没脟酶脫貌拢卢脦脪脙脟驴脡脛脺脧拢脥没脢脟 脮媒鲁拢脩脮脡芦 <-> 潞矛脡芦 脰庐录盲脡脕脣赂
+                    // 碌芦脮芒脌茂 Color.clear 脪芒脦露脳脜"虏脛脰脢脭颅脡芦"拢卢脣霉脪脭脦脪脙脟脰禄脛脺赂酶鲁枚脪禄赂枚麓酶脥赂脙梅露脠碌脛潞矛
+                    // 脠莽鹿没脢脟 Ghost 脳麓脤卢拢卢脭貌脢脟 禄脪脡芦 <-> 潞矛脡芦
+                    Color baseCol = (fog == FogStatus.Ghost) ? fogGhostColor : Color.clear;
+                    // 脠莽鹿没 baseCol 脢脟 clear拢卢Lerp 陆谩鹿没禄谩卤盲碌颅拢卢脨搂鹿没脪虏驴脡脪脭
+                    // 录貌碌楼脝冒录没拢卢脠莽鹿没脢脟 Ghost拢卢脦脪脙脟戮脥脭脷 禄脪 潞脥 潞矛 脰庐录盲 Lerp
+                    if (fog == FogStatus.Ghost)
+                    {
+                        finalColor = Color.Lerp(fogGhostColor, rippleColor, t);
+                    }
+                    else
+                    {
+                        // 驴脡录没脟酶脫貌虏篓脦脝拢潞脢鹿脫脙掳毛脥赂脙梅潞矛 (脪脌脌碌 Shader 脰搂鲁脰脥赂脙梅露脠拢卢脠莽鹿没虏禄脰搂鲁脰戮脥脢脟麓驴潞矛脡脕脣赂拢卢脪虏脨脨)
+                        finalColor = rippleColor;
+                        finalColor.a = t * 0.8f;
+                    }
                     shouldPaint = true;
                 }
                 else if (inImpact) { finalColor = playerImpactColor * impactIntensity; shouldPaint = true; }
+                else if (inSensed) { finalColor = sensedColor; shouldPaint = true; }
                 else if (isSelected) { finalColor = selectedColor * selectedIntensity; shouldPaint = true; }
                 else if (inDanger) { finalColor = enemyDangerColor * dangerIntensity; shouldPaint = true; }
                 else if (isHover)
@@ -271,7 +294,7 @@ namespace Game.Common
                 else if (inFree) { finalColor = moveFreeColor * rangeIntensity; shouldPaint = true; }
                 else if (inRange) { finalColor = rangeColor * rangeIntensity; shouldPaint = true; }
 
-                // 如果上面都没命中，且处于 Ghost 状态，则显示灰色底
+                // 脠莽鹿没脢脟 Ghost 脟脪脙禄脫脨脠脦潞脦赂脽脕脕拢卢脧脭脢戮禄脪脡芦
                 if (!shouldPaint && fog == FogStatus.Ghost)
                 {
                     finalColor = fogGhostColor;
@@ -279,7 +302,6 @@ namespace Game.Common
                 }
             }
 
-            // 应用颜色
             if (shouldPaint)
             {
                 _mpb.Clear();
@@ -294,15 +316,12 @@ namespace Game.Common
             }
             else
             {
-                // 既不是黑雾，也不是残影，也没有高亮 -> 恢复原色
                 slot.mr.SetPropertyBlock(null);
             }
         }
 
         public void ClearPaint(HexCoords c)
         {
-            // ClearPaint 其实也应该调用 Repaint 确保迷雾状态不丢
-            // 但通常 ClearPaint 用于重置特定高亮，这里建议直接调用 Repaint
             if (_slots.ContainsKey((c.q, c.r))) Repaint(c.q, c.r);
         }
     }

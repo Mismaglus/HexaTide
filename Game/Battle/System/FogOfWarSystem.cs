@@ -19,9 +19,12 @@ namespace Game.Battle
         public BattleHexGrid grid;
         public GridOccupancy occupancy;
         public HexHighlighter highlighter;
+        private BattleStateMachine _sm;
 
         [Header("Config")]
-        public int senseRangeBonus = 2; // 感知范围 = 视野 + 2
+        [Tooltip("如果单位未配置 SenseRangeBonus，则使用此默认值。")]
+        public int defaultSenseRangeBonus = 2;
+
         [Tooltip("Ghost Prefab: 一个简单的带SpriteRenderer的物体，用于显示敌人残影")]
         public GameObject ghostPrefab;
 
@@ -35,6 +38,8 @@ namespace Game.Battle
         private HashSet<int> _visibleUnitIDs = new HashSet<int>();
 
         private List<BattleUnit> _allUnitsCache = new List<BattleUnit>();
+        private readonly HashSet<HexCoords> _sensedTilesThisTurn = new HashSet<HexCoords>();
+        private readonly HashSet<UnitMover> _hookedMovers = new HashSet<UnitMover>();
 
         void Awake()
         {
@@ -42,6 +47,7 @@ namespace Game.Battle
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
             if (!occupancy) occupancy = FindFirstObjectByType<GridOccupancy>();
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
+            _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
         IEnumerator Start()
@@ -55,6 +61,27 @@ namespace Game.Battle
             }
 
             RefreshFog();
+
+            if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged;
+        }
+
+        void OnDestroy()
+        {
+            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
+        }
+
+        void HandleTurnChanged(TurnSide side)
+        {
+            if (side == TurnSide.Enemy)
+            {
+                _sensedTilesThisTurn.Clear();
+                if (highlighter) highlighter.SetSensedTiles(null);
+            }
+            else if (side == TurnSide.Player)
+            {
+                // 切回玩家回合时，展示上一敌人回合感知到的位置
+                if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
+            }
         }
 
         // ⭐⭐ 新增 API：查询格子是否可见 ⭐⭐
@@ -67,6 +94,13 @@ namespace Game.Battle
         {
             u.OnMoveFinished -= OnUnitMoveStep;
             u.OnMoveFinished += OnUnitMoveStep;
+
+            var mover = u.GetComponent<UnitMover>();
+            if (mover != null && !_hookedMovers.Contains(mover))
+            {
+                mover.OnPathCompleted += () => HandlePathCompleted(u);
+                _hookedMovers.Add(mover);
+            }
         }
 
         void OnUnitMoveStep(Unit u, HexCoords from, HexCoords to)
@@ -90,6 +124,7 @@ namespace Game.Battle
             if (grid == null) return;
 
             _visibleTiles.Clear();
+            _sensedTilesThisTurn.Clear();
 
             var playerUnits = new List<BattleUnit>();
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
@@ -104,10 +139,16 @@ namespace Game.Battle
 
             foreach (var pu in playerUnits)
             {
-                int range = 6; // 默认
-                if (pu.Attributes != null) range = pu.Attributes.Optional.SightRange;
+                int sight = 6;
+                int senseBonus = defaultSenseRangeBonus;
+                if (pu.Attributes != null)
+                {
+                    sight = pu.Attributes.Optional.SightRange;
+                    senseBonus = pu.Attributes.Optional.SenseRangeBonus > 0 ? pu.Attributes.Optional.SenseRangeBonus : defaultSenseRangeBonus;
+                }
 
-                var visibleCells = ComputeVisibility(pu.UnitRef.Coords, range);
+                // 视野决定可见格子；感知加成仅用于“感知”逻辑，不应直接揭开迷雾
+                var visibleCells = ComputeVisibility(pu.UnitRef.Coords, sight);
                 _visibleTiles.UnionWith(visibleCells);
             }
 
@@ -162,10 +203,18 @@ namespace Game.Battle
                         {
                             CreateGhost(u, u.UnitRef.Coords);
                         }
+
+                        // 感知范围内的敌人终点 -> 记录为本回合“感知”格子
+                        if (IsSensed(u.UnitRef.Coords))
+                        {
+                            _sensedTilesThisTurn.Add(u.UnitRef.Coords);
+                        }
                     }
                 }
             }
             _visibleUnitIDs = currentVisibleIDs;
+
+            if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
         }
 
         void UpdateEnemyVisibility(BattleUnit enemy, HexCoords from, HexCoords to)
@@ -195,8 +244,31 @@ namespace Game.Battle
                 if (IsSensed(to))
                 {
                     if (highlighter) highlighter.TriggerRipple(to);
+                    _sensedTilesThisTurn.Add(to);
+                    if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
                 }
             }
+        }
+
+        void HandlePathCompleted(Unit u)
+        {
+            if (u == null || u.Equals(null)) return;
+            var bu = u.GetComponent<BattleUnit>();
+            if (bu == null || bu.Equals(null)) return;
+
+            // 仅针对敌方、不可见但在感知范围的终点格子，保留持续高亮
+            if (!bu.isPlayer)
+            {
+                var pos = bu.UnitRef.Coords;
+                if (!_visibleTiles.Contains(pos) && IsSensed(pos))
+                {
+                    _sensedTilesThisTurn.Add(pos);
+                    if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
+                }
+            }
+
+            // 移动结束后刷新一次迷雾/感知，确保范围与状态及时更新
+            RefreshFog();
         }
 
         bool IsSensed(HexCoords c)
@@ -205,7 +277,9 @@ namespace Game.Battle
             {
                 if (u == null || u.Equals(null)) continue;
                 if (!u.isPlayer) continue;
-                int range = u.Attributes.Optional.SightRange + senseRangeBonus;
+                var opt = u.Attributes != null ? u.Attributes.Optional : default;
+                int senseBonus = opt.SenseRangeBonus > 0 ? opt.SenseRangeBonus : defaultSenseRangeBonus;
+                int range = opt.SightRange + senseBonus;
                 if (u.UnitRef.Coords.DistanceTo(c) <= range) return true;
             }
             return false;

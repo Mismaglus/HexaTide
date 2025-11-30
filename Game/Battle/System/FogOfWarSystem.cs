@@ -31,6 +31,7 @@ namespace Game.Battle
         // --- Runtime Data ---
         private HashSet<HexCoords> _visibleTiles = new HashSet<HexCoords>();
         private HashSet<HexCoords> _visitedTiles = new HashSet<HexCoords>();
+        private HashSet<HexCoords> _sensedArea = new HashSet<HexCoords>(); // 新增：感知范围区域
 
         // 残影字典
         private Dictionary<int, GameObject> _activeGhosts = new Dictionary<int, GameObject>();
@@ -90,6 +91,11 @@ namespace Game.Battle
             return _visibleTiles.Contains(c);
         }
 
+        public bool IsTileKnown(HexCoords c)
+        {
+            return _visibleTiles.Contains(c) || _visitedTiles.Contains(c);
+        }
+
         void RegisterUnitEvents(Unit u)
         {
             u.OnMoveFinished -= OnUnitMoveStep;
@@ -124,6 +130,7 @@ namespace Game.Battle
             if (grid == null) return;
 
             _visibleTiles.Clear();
+            _sensedArea.Clear();
             _sensedTilesThisTurn.Clear();
 
             var playerUnits = new List<BattleUnit>();
@@ -139,17 +146,16 @@ namespace Game.Battle
 
             foreach (var pu in playerUnits)
             {
-                int sight = 6;
-                int senseBonus = defaultSenseRangeBonus;
-                if (pu.Attributes != null)
-                {
-                    sight = pu.Attributes.Optional.SightRange;
-                    senseBonus = pu.Attributes.Optional.SenseRangeBonus > 0 ? pu.Attributes.Optional.SenseRangeBonus : defaultSenseRangeBonus;
-                }
+                int sight = GetSight(pu);
+                int sense = sight + GetSenseBonus(pu);
 
-                // 视野决定可见格子；感知加成仅用于“感知”逻辑，不应直接揭开迷雾
+                // 视野决定可见格子
                 var visibleCells = ComputeVisibility(pu.UnitRef.Coords, sight);
                 _visibleTiles.UnionWith(visibleCells);
+
+                // 感知决定模糊格子
+                var sensedCells = ComputeVisibility(pu.UnitRef.Coords, sense);
+                _sensedArea.UnionWith(sensedCells);
             }
 
             _visitedTiles.UnionWith(_visibleTiles);
@@ -162,6 +168,16 @@ namespace Game.Battle
                 if (_visibleTiles.Contains(cell.Coords))
                 {
                     cell.SetFogStatus(FogStatus.Visible);
+                }
+                else if (_sensedArea.Contains(cell.Coords) && !_visitedTiles.Contains(cell.Coords))
+                {
+                    // 在感知范围内，且未被探索过 -> Sensed (浅灰)
+                    // 如果已经探索过 (Ghost)，通常保持 Ghost 更好，或者你想让 Sensed 覆盖 Ghost？
+                    // 这里假设 Sensed 优先级高于 Unknown，但低于 Ghost (因为 Ghost 包含地形信息)
+                    // 但用户说 "sensed range blocks should have a light gray color"，可能希望 Sensed 覆盖 Unknown
+                    // 如果是 Ghost，已经是灰色了。
+                    // 让我们把 Sensed 仅用于 Unknown 区域的“点亮”
+                    cell.SetFogStatus(FogStatus.Sensed);
                 }
                 else if (_visitedTiles.Contains(cell.Coords))
                 {
@@ -203,16 +219,28 @@ namespace Game.Battle
                         {
                             CreateGhost(u, u.UnitRef.Coords);
                         }
-
-                        // 感知范围内的敌人终点 -> 记录为本回合“感知”格子
-                        if (IsSensed(u.UnitRef.Coords))
-                        {
-                            _sensedTilesThisTurn.Add(u.UnitRef.Coords);
-                        }
                     }
                 }
             }
             _visibleUnitIDs = currentVisibleIDs;
+
+            // 重新计算感知：不可见但在感知范围内的敌人终点
+            foreach (var enemy in _allUnitsCache)
+            {
+                if (enemy == null || enemy.Equals(null)) continue;
+                if (enemy.isPlayer) continue;
+                if (_visibleTiles.Contains(enemy.UnitRef.Coords)) continue;
+
+                foreach (var pu in playerUnits)
+                {
+                    int senseRange = GetSight(pu) + GetSenseBonus(pu);
+                    if (pu.UnitRef.Coords.DistanceTo(enemy.UnitRef.Coords) <= senseRange)
+                    {
+                        _sensedTilesThisTurn.Add(enemy.UnitRef.Coords);
+                        break;
+                    }
+                }
+            }
 
             if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
         }
@@ -244,8 +272,6 @@ namespace Game.Battle
                 if (IsSensed(to))
                 {
                     if (highlighter) highlighter.TriggerRipple(to);
-                    _sensedTilesThisTurn.Add(to);
-                    if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
                 }
             }
         }
@@ -255,17 +281,6 @@ namespace Game.Battle
             if (u == null || u.Equals(null)) return;
             var bu = u.GetComponent<BattleUnit>();
             if (bu == null || bu.Equals(null)) return;
-
-            // 仅针对敌方、不可见但在感知范围的终点格子，保留持续高亮
-            if (!bu.isPlayer)
-            {
-                var pos = bu.UnitRef.Coords;
-                if (!_visibleTiles.Contains(pos) && IsSensed(pos))
-                {
-                    _sensedTilesThisTurn.Add(pos);
-                    if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
-                }
-            }
 
             // 移动结束后刷新一次迷雾/感知，确保范围与状态及时更新
             RefreshFog();
@@ -277,12 +292,25 @@ namespace Game.Battle
             {
                 if (u == null || u.Equals(null)) continue;
                 if (!u.isPlayer) continue;
-                var opt = u.Attributes != null ? u.Attributes.Optional : default;
-                int senseBonus = opt.SenseRangeBonus > 0 ? opt.SenseRangeBonus : defaultSenseRangeBonus;
-                int range = opt.SightRange + senseBonus;
+                int range = GetSight(u) + GetSenseBonus(u);
                 if (u.UnitRef.Coords.DistanceTo(c) <= range) return true;
             }
             return false;
+        }
+
+        int GetSight(BattleUnit u)
+        {
+            if (u == null) return 0;
+            if (u.Attributes != null) return u.Attributes.Optional.SightRange;
+            return 0;
+        }
+
+        int GetSenseBonus(BattleUnit u)
+        {
+            if (u == null) return defaultSenseRangeBonus;
+            if (u.Attributes == null) return defaultSenseRangeBonus;
+            int b = u.Attributes.Optional.SenseRangeBonus;
+            return b > 0 ? b : defaultSenseRangeBonus;
         }
 
         HashSet<HexCoords> ComputeVisibility(HexCoords center, int range)

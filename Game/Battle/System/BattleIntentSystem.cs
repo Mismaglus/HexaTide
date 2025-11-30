@@ -17,6 +17,7 @@ namespace Game.Battle
         [Header("Visuals")]
         public GridOutlineManager outlineManager;
         public HexHighlighter highlighter; // ⭐ 必须引用这个才能让地板变色
+        public FogOfWarSystem fog;
 
         private List<EnemyBrain> _enemies = new List<EnemyBrain>();
         private BattleStateMachine _sm;
@@ -30,6 +31,7 @@ namespace Game.Battle
             Instance = this;
             if (!outlineManager) outlineManager = FindFirstObjectByType<GridOutlineManager>();
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(); // 自动查找
+            if (!fog) fog = FindFirstObjectByType<FogOfWarSystem>();
             _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
@@ -94,8 +96,12 @@ namespace Game.Battle
                         HexCoords castOrigin = plan.moveDest;
 
                         var area = TargetingResolver.GetAOETiles(plan.targetCell, plan.ability, castOrigin);
-
-                        _dangerZone.UnionWith(area);
+                        foreach (var cell in area)
+                        {
+                            // 只对玩家“已知”(Visible/Ghost)的格子显示红框，避免探雾
+                            if (fog != null && !fog.IsTileKnown(cell)) continue;
+                            _dangerZone.Add(cell);
+                        }
 
                         if (!plan.targetCell.Equals(enemyUnit.Coords))
                         {

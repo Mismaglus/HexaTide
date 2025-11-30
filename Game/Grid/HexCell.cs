@@ -18,6 +18,7 @@ namespace Game.Grid
     public enum FogStatus
     {
         Unknown,    // 未探索 (黑雾)
+        Sensed,     // 感知范围内 (浅灰/模糊)
         Ghost,      // 记忆中 (残影)
         Visible     // 可见
     }
@@ -100,6 +101,9 @@ namespace Game.Grid
                     break;
                 case FogStatus.Ghost:
                     targetColor = new Color(0.5f, 0.5f, 0.6f, 1f); // 灰色/暗淡
+                    break;
+                case FogStatus.Sensed:
+                    targetColor = new Color(0.3f, 0.3f, 0.3f, 1f); // 浅黑/深灰
                     break;
                 case FogStatus.Unknown:
                     targetColor = Color.black; // 纯黑

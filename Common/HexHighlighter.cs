@@ -282,7 +282,7 @@ namespace Game.Common
                     shouldPaint = true;
                 }
                 else if (inImpact) { finalColor = playerImpactColor * impactIntensity; shouldPaint = true; }
-                else if (inSensed) { finalColor = sensedColor; shouldPaint = true; }
+                else if (inSensed && fog != FogStatus.Visible) { finalColor = sensedColor; shouldPaint = true; }
                 else if (isSelected) { finalColor = selectedColor * selectedIntensity; shouldPaint = true; }
                 else if (inDanger) { finalColor = enemyDangerColor * dangerIntensity; shouldPaint = true; }
                 else if (isHover)

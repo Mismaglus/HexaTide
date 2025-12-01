@@ -222,7 +222,14 @@ namespace Game.Common
             var coord = new HexCoords(q, r);
 
             FogStatus fog = FogStatus.Visible;
-            if (slot.cell != null) fog = slot.cell.fogStatus;
+            Color baseColUnknown = fogUnknownColor;
+            Color baseColGhost = fogGhostColor;
+            if (slot.cell != null)
+            {
+                fog = slot.cell.fogStatus;
+                baseColUnknown = slot.cell.FogColorUnknown;
+                baseColGhost = slot.cell.FogColorGhost;
+            }
 
             bool isRipple = _activeRipples.ContainsKey(coord);
             bool inImpact = _impact.Contains(coord);
@@ -244,7 +251,7 @@ namespace Game.Common
                 if (isRipple)
                 {
                     float t = Mathf.PingPong(Time.time * 8f, 1f);
-                    finalColor = Color.Lerp(fogUnknownColor, rippleColor, t);
+                    finalColor = Color.Lerp(baseColUnknown, rippleColor, t);
                     shouldPaint = true;
                 }
                 else if (inSensed)
@@ -254,7 +261,7 @@ namespace Game.Common
                 }
                 else
                 {
-                    finalColor = fogUnknownColor;
+                    finalColor = baseColUnknown;
                     shouldPaint = true;
                 }
             }
@@ -267,12 +274,12 @@ namespace Game.Common
                     // ¶ÔÓÚ¿É¼ûÇøÓò£¬ÎÒÃÇ¿ÉÄÜÏ£ÍûÊÇ Õý³£ÑÕÉ« <-> ºìÉ« Ö®¼äÉÁË¸
                     // µ«ÕâÀï Color.clear ÒâÎ¶×Å"²ÄÖÊÔ­É«"£¬ËùÒÔÎÒÃÇÖ»ÄÜ¸ø³öÒ»¸ö´øÍ¸Ã÷¶ÈµÄºì
                     // Èç¹ûÊÇ Ghost ×´Ì¬£¬ÔòÊÇ »ÒÉ« <-> ºìÉ«
-                    Color baseCol = (fog == FogStatus.Ghost) ? fogGhostColor : Color.clear;
+                    Color baseCol = (fog == FogStatus.Ghost) ? baseColGhost : Color.clear;
                     // Èç¹û baseCol ÊÇ clear£¬Lerp ½á¹û»á±äµ­£¬Ð§¹ûÒ²¿ÉÒÔ
                     // ¼òµ¥Æð¼û£¬Èç¹ûÊÇ Ghost£¬ÎÒÃÇ¾ÍÔÚ »Ò ºÍ ºì Ö®¼ä Lerp
                     if (fog == FogStatus.Ghost)
                     {
-                        finalColor = Color.Lerp(fogGhostColor, rippleColor, t);
+                        finalColor = Color.Lerp(baseColGhost, rippleColor, t);
                     }
                     else
                     {
@@ -298,7 +305,7 @@ namespace Game.Common
                 // Èç¹ûÊÇ Ghost ÇÒÃ»ÓÐÈÎºÎ¸ßÁÁ£¬ÏÔÊ¾»ÒÉ«
                 if (!shouldPaint && fog == FogStatus.Ghost)
                 {
-                    finalColor = fogGhostColor;
+                    finalColor = baseColGhost;
                     shouldPaint = true;
                 }
             }

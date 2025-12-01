@@ -38,6 +38,18 @@ namespace Game.Grid
         [Header("Fog State")]
         public FogStatus fogStatus = FogStatus.Unknown;
 
+        [Header("Fog Colors")]
+        [SerializeField] private Color colorVisible = Color.white;
+        [SerializeField] private Color colorGhost = new Color(0.25f, 0.23f, 0.28f, 1f);   // 柔和的暖灰紫
+        [SerializeField] private Color colorSensed = new Color(0.32f, 0.30f, 0.35f, 1f); // 介于可见与记忆之间
+        [SerializeField] private Color colorUnknown = new Color(0.06f, 0.08f, 0.12f, 1f); // 深蓝灰，而非纯黑
+
+        // 供外部读取（例如 HexHighlighter 想使用每个格子的自定义雾色）
+        public Color FogColorVisible => colorVisible;
+        public Color FogColorGhost => colorGhost;
+        public Color FogColorSensed => colorSensed;
+        public Color FogColorUnknown => colorUnknown;
+
         // 缓存渲染器用于变色
         private MeshRenderer _meshRenderer;
         private MaterialPropertyBlock _mpb;
@@ -97,16 +109,16 @@ namespace Game.Grid
             switch (fogStatus)
             {
                 case FogStatus.Visible:
-                    targetColor = Color.white; // 原色
+                    targetColor = colorVisible; // 原色
                     break;
                 case FogStatus.Ghost:
-                    targetColor = new Color(0.5f, 0.5f, 0.6f, 1f); // 灰色/暗淡
+                    targetColor = colorGhost;
                     break;
                 case FogStatus.Sensed:
-                    targetColor = new Color(0.3f, 0.3f, 0.3f, 1f); // 浅黑/深灰
+                    targetColor = colorSensed;
                     break;
                 case FogStatus.Unknown:
-                    targetColor = Color.black; // 纯黑
+                    targetColor = colorUnknown;
                     break;
             }
 

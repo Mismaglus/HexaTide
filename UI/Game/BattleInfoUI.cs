@@ -11,178 +11,211 @@ namespace Game.UI
     {
         [Header("References")]
         public TextMeshProUGUI chapterLabel;
-        public TextMeshProUGUI turnLabel;
+        public TextMeshProUGUI turnLabel; // 显示 "Round 2 - Player Turn"
 
-        [Header("Settings")]
-        [Tooltip("当前章节索引 (1 = 第一章/Chapter I)。")]
+        // 已移除独立的 phaseLabel，因为现在合并显示了
+
+        [Header("Data Settings")]
+        [Tooltip("当前章节索引 (1 = Chapter I)")]
         public int currentChapterIndex = 1;
 
-        [Header("Localization Keys")]
-        public string keyChapterFormat = "UI_CHAPTER_FORMAT"; // "Chapter {0}" or "第{0}章"
-        public string keyTurnFormat = "UI_TURN_FORMAT";       // "Turn {0}" or "第{0}回合"
+        [Tooltip("章节名称的本地化Key (例如 'CHAPTER_NAME_1' -> 'Forest')")]
+        public string currentChapterNameKey = "CHAPTER_NAME_1";
+
+        [Header("Localization Formats")]
+        [Tooltip("Value 应该是 'Chapter {0} - {1}' 或 '第{0}章 - {1}'")]
+        public string keyChapterFormat = "UI_CHAPTER_FULL_FORMAT";
+
+        [Tooltip("Value 应该是 'Round {0} - {1}' 或 '第{0}轮 - {1}'")]
+        public string keyTurnFormat = "UI_ROUND_FULL_FORMAT";
+
+        [Header("Phase Names")]
+        public string keyPhasePlayer = "UI_PHASE_PLAYER";     // "Player Turn"
+        public string keyPhaseEnemy = "UI_PHASE_ENEMY";       // "Enemy Turn"
+
+        [Header("Colors (Rich Text)")]
+        // 使用富文本颜色代码，因为我们在同一个Label里显示
+        public string colorPlayerHex = "#33CCFF"; // 玩家回合蓝
+        public string colorEnemyHex = "#FF5555";  // 敌方回合红
 
         // Runtime State
         private int _currentTurnCount = 1;
         private BattleStateMachine _sm;
+        private bool _subscribed;
+        private TurnSide _lastSide = TurnSide.Player;
 
         void Awake()
         {
-            _sm = FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Exclude);
+            ResolveStateMachine();
         }
 
         void OnEnable()
         {
-            if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged;
-            RefreshUI();
+            ResolveStateMachine();
+            if (_sm != null) Subscribe();
+
+            var side = _sm != null ? _sm.CurrentTurn : TurnSide.Player;
+            RefreshUI(side);
         }
 
         void OnDisable()
         {
-            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
+            if (_sm != null && _subscribed)
+            {
+                _sm.OnTurnChanged -= HandleTurnChanged;
+                _subscribed = false;
+            }
+        }
+
+        void Update()
+        {
+            // 防守式兜底：如果事件丢失或迟到，轮询当前 TurnSide
+            if (_sm == null) ResolveStateMachine();
+            if (_sm != null)
+            {
+                if (_sm.CurrentTurn != _lastSide)
+                {
+                    HandleTurnChanged(_sm.CurrentTurn);
+                }
+            }
         }
 
         void HandleTurnChanged(TurnSide side)
         {
-            // 只有在非开局时切回玩家回合才+1
+            // 计数逻辑：只有在非开局时切回玩家回合才+1
             if (side == TurnSide.Player && Time.timeSinceLevelLoad > 0.1f)
             {
                 _currentTurnCount++;
             }
-            RefreshUI();
+
+            RefreshUI(side);
+            _lastSide = side;
         }
 
-        public void RefreshUI()
+        public void RefreshUI(TurnSide currentSide)
         {
+            // ================= 1. 章节显示 =================
+            // 格式: "Chapter {0} - {1}"
+            // arg0: 数字 (I / 一), arg1: 名字 (Forest / 森林)
+
             string chapterFmt = LocalizationManager.Get(keyChapterFormat);
-            string turnFmt = LocalizationManager.Get(keyTurnFormat);
+            bool useChinese = chapterFmt.Contains("第"); // 简单判定语言
 
-            // 简单判断是否为中文环境 (也可以检查 LocalizationManager.CurrentLanguage)
-            bool useChinese = chapterFmt.Contains("第") || turnFmt.Contains("第");
+            // 获取章节数字符串
+            string chapNumStr = useChinese ? IntToChinese(currentChapterIndex) : IntToRoman(currentChapterIndex);
 
-            string chapNumStr;
-            string turnNumStr;
+            // 获取章节名
+            string chapNameStr = LocalizationManager.Get(currentChapterNameKey);
 
-            if (useChinese)
+            if (chapterLabel != null)
             {
-                // 中文：章节用中文数字 (第一章, 第十二章)
-                chapNumStr = IntToChinese(currentChapterIndex);
+                chapterLabel.text = string.Format(chapterFmt, chapNumStr, chapNameStr);
+            }
 
-                // 中文：回合数
-                // 策略：如果回合数太大(>99)，中文太长会破坏UI，建议切回阿拉伯数字
-                // 例如："第一百二十五回合" (7字) vs "第125回合" (4字)
-                if (_currentTurnCount <= 99)
-                    turnNumStr = IntToChinese(_currentTurnCount);
-                else
-                    turnNumStr = _currentTurnCount.ToString();
+            // ================= 2. 回合(Round)显示 =================
+            // 格式: "Round {0} - {1}"
+            // arg0: 数字 (2 / 二), arg1: 相位 (Player Turn / 玩家回合)
+
+            string roundFmt = LocalizationManager.Get(keyTurnFormat);
+
+            // 获取回合数字符串
+            string turnNumStr;
+            if (useChinese && _currentTurnCount <= 99)
+                turnNumStr = IntToChinese(_currentTurnCount);
+            else
+                turnNumStr = _currentTurnCount.ToString();
+
+            // 获取相位名 & 颜色处理
+            string phaseName;
+            string colorHex;
+
+            if (currentSide == TurnSide.Player)
+            {
+                phaseName = LocalizationManager.Get(keyPhasePlayer);
+                colorHex = colorPlayerHex;
             }
             else
             {
-                // 英文：章节用罗马数字 (Chapter I, Chapter XI)
-                chapNumStr = IntToRoman(currentChapterIndex);
-                // 英文：回合用阿拉伯数字 (Turn 1, Turn 12)
-                turnNumStr = _currentTurnCount.ToString();
+                phaseName = LocalizationManager.Get(keyPhaseEnemy);
+                colorHex = colorEnemyHex;
             }
 
-            if (chapterLabel != null) chapterLabel.text = string.Format(chapterFmt, chapNumStr);
-            if (turnLabel != null) turnLabel.text = string.Format(turnFmt, turnNumStr);
+            // 拼接：给相位名加上颜色标签 <color=...>{1}</color>
+            string coloredPhase = $"<color={colorHex}>{phaseName}</color>";
+
+            if (turnLabel != null)
+            {
+                // 注意：这里不仅填入数字，还填入带颜色的相位名
+                turnLabel.text = string.Format(roundFmt, turnNumStr, coloredPhase);
+            }
         }
 
         public void ResetCounter()
         {
             _currentTurnCount = 1;
-            RefreshUI();
+            RefreshUI(TurnSide.Player);
         }
 
-        // =========================================================
-        // ⭐ 通用算法区域
-        // =========================================================
+        void ResolveStateMachine()
+        {
+            if (_sm == null)
+            {
+                _sm = FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Include);
+            }
 
-        /// <summary>
-        /// 通用整数转罗马数字 (支持 1 - 3999)
-        /// </summary>
+            // 防守式：如果之前没订阅且现在找到了，就订阅
+            if (_sm != null && !_subscribed)
+            {
+                Subscribe();
+                _lastSide = _sm.CurrentTurn;
+                RefreshUI(_lastSide);
+            }
+        }
+
+        void Subscribe()
+        {
+            if (_sm == null) return;
+            _sm.OnTurnChanged -= HandleTurnChanged;
+            _sm.OnTurnChanged += HandleTurnChanged;
+            _subscribed = true;
+        }
+
+        // ================= 数字转换工具 =================
+
         private string IntToRoman(int num)
         {
             if (num < 1) return num.ToString();
-            if (num >= 4000) return num.ToString(); // 罗马数字标准不支持 >= 4000
-
+            if (num >= 4000) return num.ToString();
             StringBuilder sb = new StringBuilder();
-
-            // 映射表
-            (int val, string s)[] map = {
-                (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-                (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-                (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")
-            };
-
-            foreach (var pair in map)
-            {
-                while (num >= pair.val)
-                {
-                    sb.Append(pair.s);
-                    num -= pair.val;
-                }
-            }
+            (int val, string s)[] map = { (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I") };
+            foreach (var pair in map) { while (num >= pair.val) { sb.Append(pair.s); num -= pair.val; } }
             return sb.ToString();
         }
 
-        /// <summary>
-        /// 通用整数转中文数字 (支持 0 - 9999)
-        /// 自动处理 "一十" -> "十" 的口语化习惯
-        /// </summary>
         private string IntToChinese(int num)
         {
             if (num == 0) return "零";
-            if (num < 0) return num.ToString(); // 负数暂不处理
-
+            if (num < 0) return num.ToString();
             string[] digits = { "零", "一", "二", "三", "四", "五", "六", "七", "八", "九" };
             string[] units = { "", "十", "百", "千", "万" };
-
-            // 拆分数字
             List<int> parts = new List<int>();
             int temp = num;
-            while (temp > 0)
-            {
-                parts.Add(temp % 10);
-                temp /= 10;
-            }
-
+            while (temp > 0) { parts.Add(temp % 10); temp /= 10; }
             StringBuilder sb = new StringBuilder();
-            bool zeroFlag = false; // 连续零标记
-
+            bool zeroFlag = false;
             for (int i = parts.Count - 1; i >= 0; i--)
             {
                 int digit = parts[i];
-                int unitIdx = i; // 0=个, 1=十, 2=百...
-
+                int unitIdx = i;
                 if (digit != 0)
                 {
-                    if (zeroFlag)
-                    {
-                        sb.Append(digits[0]); // 补零 (例如 101 -> 一百零一)
-                        zeroFlag = false;
-                    }
-
-                    // 处理 "一十" -> "十" 的特殊情况 (仅在十位且总位数<=2时，如 12->十二, 但 112->一百一十二)
-                    if (digit == 1 && unitIdx == 1 && parts.Count == 2)
-                    {
-                        // 不加"一"，直接加单位
-                    }
-                    else
-                    {
-                        sb.Append(digits[digit]);
-                    }
-
+                    if (zeroFlag) { sb.Append(digits[0]); zeroFlag = false; }
+                    if (digit == 1 && unitIdx == 1 && parts.Count == 2) { }
+                    else { sb.Append(digits[digit]); }
                     sb.Append(units[unitIdx]);
                 }
-                else
-                {
-                    // 遇到0，不立即输出，而是标记，只有下一位非0时才补零
-                    // 个位数的0不输出 (如 20 -> 二十，而不是 二十零)
-                    if (unitIdx != 0)
-                        zeroFlag = true;
-                }
+                else { if (unitIdx != 0) zeroFlag = true; }
             }
-
             return sb.ToString();
         }
     }

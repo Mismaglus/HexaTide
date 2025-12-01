@@ -34,8 +34,9 @@ namespace Game.Common
         public Color sensedColor = new Color(1f, 0.5f, 0.2f, 0.35f); // ¼àÖØµ½µÄµÐÈË»î¶¯ÇøÓò
 
         [Header("Fog Colors")]
-        public Color fogUnknownColor = Color.black;
-        public Color fogGhostColor = new Color(0.5f, 0.5f, 0.6f, 1f);
+        // 略带色彩的“未知/记忆”色，避免纯黑/纯灰
+        public Color fogUnknownColor = new Color(0.05f, 0.08f, 0.12f, 1f); // 深蓝灰
+        public Color fogGhostColor = new Color(0.25f, 0.23f, 0.28f, 1f);   // 暖灰紫
 
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;

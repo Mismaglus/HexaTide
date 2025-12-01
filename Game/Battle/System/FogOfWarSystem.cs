@@ -5,6 +5,7 @@ using Core.Hex;
 using Game.Units;
 using Game.Grid;
 using Game.Common;
+using Game.Core;
 
 namespace Game.Battle
 {
@@ -27,8 +28,30 @@ namespace Game.Battle
         // --- Runtime Data ---
         private HashSet<HexCoords> _visibleTiles = new HashSet<HexCoords>();
         private HashSet<HexCoords> _visitedTiles = new HashSet<HexCoords>();
+        private HashSet<HexCoords> _sensedTilesThisTurn = new HashSet<HexCoords>(); // 本回合感知到的敌人位置
+        private HashSet<int> _movedUnitsThisTurn = new HashSet<int>(); // 记录本回合移动过的单位ID
 
         private List<BattleUnit> _allUnitsCache = new List<BattleUnit>();
+        private BattleStateMachine _sm;
+
+        void CleanupUnitCache()
+        {
+            for (int i = _allUnitsCache.Count - 1; i >= 0; i--)
+            {
+                if (!IsUnitAlive(_allUnitsCache[i]))
+                {
+                    _allUnitsCache.RemoveAt(i);
+                }
+            }
+        }
+
+        bool IsUnitAlive(BattleUnit unit)
+        {
+            if (!unit) return false;
+            var attributes = unit.Attributes;
+            if (attributes == null) return false;
+            return attributes.Core.HP > 0;
+        }
 
         void Awake()
         {
@@ -36,6 +59,7 @@ namespace Game.Battle
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
             if (!occupancy) occupancy = FindFirstObjectByType<GridOccupancy>();
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
+            _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>();
         }
 
         IEnumerator Start()
@@ -50,6 +74,58 @@ namespace Game.Battle
             }
 
             RefreshFog();
+
+            if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged;
+        }
+
+        void OnDestroy()
+        {
+            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
+        }
+
+        void HandleTurnChanged(TurnSide side)
+        {
+            if (side == TurnSide.Enemy)
+            {
+                // 敌人回合开始：
+                // 不再清除感知标记，保留上一回合的侦测结果，直到敌人真正移动或状态改变
+                // _sensedTilesThisTurn.Clear(); 
+                // if (highlighter) highlighter.SetSensedTiles(null);
+
+                _movedUnitsThisTurn.Clear();
+            }
+            else if (side == TurnSide.Player)
+            {
+                // 玩家回合开始 (即敌人回合结束结算)：
+
+                // 1. 刷新迷雾，计算所有敌人的最新位置是否在感知范围内
+                // 这会更新 _sensedTilesThisTurn 并通过 SetSensedTiles 设置持久高亮 (保留 Ripple Color)
+                RefreshFog();
+
+                // 2. 针对每个敌人进行波纹检测
+                foreach (var enemy in _allUnitsCache)
+                {
+                    if (enemy == null || enemy.isPlayer) continue;
+
+                    bool isSensed = _sensedTilesThisTurn.Contains(enemy.UnitRef.Coords);
+                    bool hasMoved = _movedUnitsThisTurn.Contains(enemy.GetInstanceID());
+
+                    if (isSensed)
+                    {
+                        if (!hasMoved)
+                        {
+                            // 如果他在sense range内 且 没有移动过：
+                            // Trigger Ripple (闪烁一次) 且保留 Ripple Color (由上面的 RefreshFog 处理)
+                            if (highlighter) highlighter.TriggerRipple(enemy.UnitRef.Coords);
+                        }
+                        else
+                        {
+                            // 如果移动过（也就是说ripple color已经绘制过了）：
+                            // 单纯的保留 Ripple Color (由上面的 RefreshFog 处理，此处无需操作)
+                        }
+                    }
+                }
+            }
         }
 
         // API：查询格子是否可见 (用于交互限制，如禁止选中不可见单位)
@@ -75,6 +151,8 @@ namespace Game.Battle
             var bu = u.GetComponent<BattleUnit>();
             if (bu == null) return;
 
+            _movedUnitsThisTurn.Add(bu.GetInstanceID()); // 记录移动过的单位
+
             if (bu.isPlayer)
             {
                 // 玩家移动：刷新全场视野
@@ -93,12 +171,16 @@ namespace Game.Battle
             if (grid == null) return;
 
             _visibleTiles.Clear();
+            _sensedTilesThisTurn.Clear(); // 重新计算感知列表
 
             // 1. 收集单位
             var playerUnits = new List<BattleUnit>();
             var allObjs = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             _allUnitsCache.Clear();
-            _allUnitsCache.AddRange(allObjs);
+            foreach (var unit in allObjs)
+            {
+                if (IsUnitAlive(unit)) _allUnitsCache.Add(unit);
+            }
 
             foreach (var u in _allUnitsCache)
             {
@@ -150,13 +232,30 @@ namespace Game.Battle
                     // 简单粗暴：如果在视野里就显示，不在就隐藏
                     bool isVisibleNow = _visibleTiles.Contains(u.UnitRef.Coords);
                     SetUnitVisible(u, isVisibleNow);
+
+                    // 如果不可见，检查是否在感知范围内
+                    if (!isVisibleNow && IsSensed(u.UnitRef.Coords))
+                    {
+                        _sensedTilesThisTurn.Add(u.UnitRef.Coords);
+                    }
                 }
             }
+
+            // 将感知到的位置传递给高亮器 (持久显示)
+            if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
         }
 
         // === 敌人移动时的特殊处理 (波纹) ===
         void UpdateEnemyVisibility(BattleUnit enemy, HexCoords from, HexCoords to)
         {
+            // 敌人开始移动（或移动了一步）：立即移除它原位置的感知高亮
+            // 这样可以满足“只有在敌人移动的时候才消除掉ripple”的需求
+            if (_sensedTilesThisTurn.Contains(from))
+            {
+                _sensedTilesThisTurn.Remove(from);
+                if (highlighter) highlighter.SetSensedTiles(_sensedTilesThisTurn);
+            }
+
             bool toVisible = _visibleTiles.Contains(to);
 
             if (toVisible)
@@ -180,11 +279,20 @@ namespace Game.Battle
         // 检查是否在感知范围内 (Visible range + Sense Bonus)
         bool IsSensed(HexCoords c)
         {
+            CleanupUnitCache();
+
             foreach (var u in _allUnitsCache)
             {
-                if (!u.isPlayer) continue;
-                int range = u.Attributes.Optional.SightRange + senseRangeBonus;
-                if (u.UnitRef.Coords.DistanceTo(c) <= range) return true;
+                if (!IsUnitAlive(u)) continue;
+
+                var unitRef = u.UnitRef;
+                if (unitRef == null) continue;
+
+                var faction = unitRef.Faction;
+                if (faction == null || faction.side != Side.Player) continue;
+
+                int range = u.Attributes != null ? u.Attributes.Optional.SightRange + senseRangeBonus : senseRangeBonus;
+                if (unitRef.Coords.DistanceTo(c) <= range) return true;
             }
             return false;
         }
@@ -226,11 +334,22 @@ namespace Game.Battle
         // === 单位显隐控制 ===
         void SetUnitVisible(BattleUnit unit, bool visible)
         {
+            if (!unit) return;
+
             var renderers = unit.GetComponentsInChildren<Renderer>(true);
             foreach (var r in renderers) r.enabled = visible;
 
             var canvases = unit.GetComponentsInChildren<Canvas>(true);
             foreach (var c in canvases) c.enabled = visible;
+        }
+
+        public void OnUnitDied(BattleUnit unit)
+        {
+            if (unit == null) return;
+
+            _allUnitsCache.Remove(unit);
+            CleanupUnitCache();
+            RefreshFog();
         }
     }
 }

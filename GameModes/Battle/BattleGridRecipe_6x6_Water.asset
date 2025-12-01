@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e51db1be56216b64498827a85e0668b4, type: 3}
-  m_Name: BattleGridRecipe_6x6
+  m_Name: BattleGridRecipe_6x6_Water
   m_EditorClassIdentifier: 
   width: 12
   height: 12
@@ -18,7 +18,7 @@ MonoBehaviour:
   useOddROffset: 1
   outerRadius: 1
   thickness: 0.3
-  tileMaterial: {fileID: 2100000, guid: 245bd6266ec094f43bf4a8107ac0eb85, type: 2}
+  tileMaterial: {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}
   borderMode: 2
   borderWidth: 0.05
   borderYOffset: 0.001

@@ -203,6 +203,11 @@ namespace Game.Battle
                 BattleStateMachine.Instance.OnUnitDied(this);
             }
 
+            if (FogOfWarSystem.Instance != null)
+            {
+                FogOfWarSystem.Instance.OnUnitDied(this);
+            }
+
             Destroy(gameObject, 2.0f);
         }
     }

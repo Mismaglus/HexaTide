@@ -40,9 +40,9 @@ namespace Game.Grid
 
         [Header("Fog Colors")]
         [SerializeField] private Color colorVisible = Color.white;
-        [SerializeField] private Color colorGhost = new Color(0.25f, 0.23f, 0.28f, 1f);   // 柔和的暖灰紫
-        [SerializeField] private Color colorSensed = new Color(0.32f, 0.30f, 0.35f, 1f); // 介于可见与记忆之间
-        [SerializeField] private Color colorUnknown = new Color(0.06f, 0.08f, 0.12f, 1f); // 深蓝灰，而非纯黑
+        [SerializeField] private Color colorGhost = new Color(0.7f, 0.7f, 0.7f, 1f);     // 调亮：中性灰蓝，保留更多地形细节
+        [SerializeField] private Color colorSensed = new Color(0.6f, 0.4f, 0.4f, 1f);    // 调亮：感知到的波纹色
+        [SerializeField] private Color colorUnknown = new Color(0.5f, 0.5f, 0.5f, 0.1f);  // 稍微调亮：深色但不至于死黑
 
         // 供外部读取（例如 HexHighlighter 想使用每个格子的自定义雾色）
         public Color FogColorVisible => colorVisible;
@@ -74,7 +74,7 @@ namespace Game.Grid
         // 出生时立刻应用当前的 FogStatus
         private void Start()
         {
-            UpdateFogVisuals();
+            RefreshFogVisuals();
         }
 
         // ⭐⭐⭐ 补回丢失的方法：获取移动消耗 ⭐⭐⭐
@@ -95,10 +95,10 @@ namespace Game.Grid
         {
             if (fogStatus == status) return;
             fogStatus = status;
-            UpdateFogVisuals();
+            RefreshFogVisuals();
         }
 
-        private void UpdateFogVisuals()
+        public void RefreshFogVisuals()
         {
             if (_meshRenderer == null) return;
 

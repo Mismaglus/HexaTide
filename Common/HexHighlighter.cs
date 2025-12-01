@@ -31,12 +31,7 @@ namespace Game.Common
 
         [Header("FX Colors")]
         public Color rippleColor = new Color(1f, 0.2f, 0.2f, 1f); // ½¨ÒéÉèÎªÁÁºìÉ«£¬Alpha=1
-        public Color sensedColor = new Color(1f, 0.5f, 0.2f, 0.35f); // ¼àÖØµ½µÄµÐÈË»î¶¯ÇøÓò
-
-        [Header("Fog Colors")]
-        // 略带色彩的“未知/记忆”色，避免纯黑/纯灰
-        public Color fogUnknownColor = new Color(0.05f, 0.08f, 0.12f, 1f); // 深蓝灰
-        public Color fogGhostColor = new Color(0.25f, 0.23f, 0.28f, 1f);   // 暖灰紫
+        public Color sensedColor = new Color(1f, 0.2f, 0.2f, 0.6f); // 感知到的敌人（红色高亮，类似波纹但持久）
 
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
@@ -222,14 +217,7 @@ namespace Game.Common
             var coord = new HexCoords(q, r);
 
             FogStatus fog = FogStatus.Visible;
-            Color baseColUnknown = fogUnknownColor;
-            Color baseColGhost = fogGhostColor;
-            if (slot.cell != null)
-            {
-                fog = slot.cell.fogStatus;
-                baseColUnknown = slot.cell.FogColorUnknown;
-                baseColGhost = slot.cell.FogColorGhost;
-            }
+            if (slot.cell != null) fog = slot.cell.fogStatus;
 
             bool isRipple = _activeRipples.ContainsKey(coord);
             bool inImpact = _impact.Contains(coord);
@@ -244,54 +232,48 @@ namespace Game.Common
             Color finalColor = Color.clear;
             bool shouldPaint = false;
 
-            // --- Âß¼­ÐÞÕý£º»ìºÏ¼ÆËã ---
+            // --- 优先级逻辑 ---
+            // 1. 波纹 (Ripple) - 最高优先级，瞬时侦测情报
+            if (isRipple)
+            {
+                float t = Mathf.PingPong(Time.time * 8f, 1f);
+                // 为了保证波纹在任何背景下都可见，我们在 BaseColor 和 RippleColor 之间闪烁
+                // BaseColor 取决于当前的迷雾状态（从 HexCell 获取，保证一致性）
+                Color baseColor = Color.white;
+                if (slot.cell != null)
+                {
+                    if (fog == FogStatus.Unknown) baseColor = slot.cell.FogColorUnknown;
+                    else if (fog == FogStatus.Ghost) baseColor = slot.cell.FogColorGhost;
+                    else if (fog == FogStatus.Sensed) baseColor = slot.cell.FogColorSensed;
+                    else baseColor = slot.cell.FogColorVisible;
+                }
 
-            if (fog == FogStatus.Unknown)
-            {
-                if (isRipple)
-                {
-                    float t = Mathf.PingPong(Time.time * 8f, 1f);
-                    finalColor = Color.Lerp(baseColUnknown, rippleColor, t);
-                    shouldPaint = true;
-                }
-                else if (inSensed)
-                {
-                    finalColor = sensedColor;
-                    shouldPaint = true;
-                }
-                else
-                {
-                    finalColor = baseColUnknown;
-                    shouldPaint = true;
-                }
+                finalColor = Color.Lerp(baseColor, rippleColor, t);
+                shouldPaint = true;
             }
-            else // Ghost or Visible
+            // 2. 玩家预瞄 (Impact) - 次高优先级，UI交互反馈，需覆盖迷雾
+            else if (inImpact)
             {
-                // Õý³£µÄÓÅÏÈ¼¶Âß¼­
-                if (isRipple)
-                {
-                    float t = Mathf.PingPong(Time.time * 8f, 1f);
-                    // ¶ÔÓÚ¿É¼ûÇøÓò£¬ÎÒÃÇ¿ÉÄÜÏ£ÍûÊÇ Õý³£ÑÕÉ« <-> ºìÉ« Ö®¼äÉÁË¸
-                    // µ«ÕâÀï Color.clear ÒâÎ¶×Å"²ÄÖÊÔ­É«"£¬ËùÒÔÎÒÃÇÖ»ÄÜ¸ø³öÒ»¸ö´øÍ¸Ã÷¶ÈµÄºì
-                    // Èç¹ûÊÇ Ghost ×´Ì¬£¬ÔòÊÇ »ÒÉ« <-> ºìÉ«
-                    Color baseCol = (fog == FogStatus.Ghost) ? baseColGhost : Color.clear;
-                    // Èç¹û baseCol ÊÇ clear£¬Lerp ½á¹û»á±äµ­£¬Ð§¹ûÒ²¿ÉÒÔ
-                    // ¼òµ¥Æð¼û£¬Èç¹ûÊÇ Ghost£¬ÎÒÃÇ¾ÍÔÚ »Ò ºÍ ºì Ö®¼ä Lerp
-                    if (fog == FogStatus.Ghost)
-                    {
-                        finalColor = Color.Lerp(baseColGhost, rippleColor, t);
-                    }
-                    else
-                    {
-                        // ¿É¼ûÇøÓò²¨ÎÆ£ºÊ¹ÓÃ°ëÍ¸Ã÷ºì (ÒÀÀµ Shader Ö§³ÖÍ¸Ã÷¶È£¬Èç¹û²»Ö§³Ö¾ÍÊÇ´¿ºìÉÁË¸£¬Ò²ÐÐ)
-                        finalColor = rippleColor;
-                        finalColor.a = t * 0.8f;
-                    }
-                    shouldPaint = true;
-                }
-                else if (inImpact) { finalColor = playerImpactColor * impactIntensity; shouldPaint = true; }
-                else if (inSensed && fog != FogStatus.Visible) { finalColor = sensedColor; shouldPaint = true; }
-                else if (isSelected) { finalColor = selectedColor * selectedIntensity; shouldPaint = true; }
+                finalColor = playerImpactColor * impactIntensity;
+                shouldPaint = true;
+            }
+            // 3. 感知 (Sensed) - 持续的侦测状态 (仅在不可见时显示)
+            else if (inSensed && fog != FogStatus.Visible)
+            {
+                finalColor = sensedColor;
+                shouldPaint = true;
+            }
+            // 4. 黑雾 (Fog Unknown) - 遮挡层
+            // 如果是未知区域，且没有上述高优先级事件，则不显示任何普通高亮
+            else if (fog == FogStatus.Unknown)
+            {
+                shouldPaint = false; // 交由 HexCell 显示原本的黑色
+            }
+            // 5. 普通高亮 (Selected / Danger / Hover / Move / Range)
+            // 仅在 Visible 或 Ghost 状态下显示
+            else
+            {
+                if (isSelected) { finalColor = selectedColor * selectedIntensity; shouldPaint = true; }
                 else if (inDanger) { finalColor = enemyDangerColor * dangerIntensity; shouldPaint = true; }
                 else if (isHover)
                 {
@@ -301,13 +283,6 @@ namespace Game.Common
                 else if (inCost) { finalColor = moveCostColor * rangeIntensity; shouldPaint = true; }
                 else if (inFree) { finalColor = moveFreeColor * rangeIntensity; shouldPaint = true; }
                 else if (inRange) { finalColor = rangeColor * rangeIntensity; shouldPaint = true; }
-
-                // Èç¹ûÊÇ Ghost ÇÒÃ»ÓÐÈÎºÎ¸ßÁÁ£¬ÏÔÊ¾»ÒÉ«
-                if (!shouldPaint && fog == FogStatus.Ghost)
-                {
-                    finalColor = baseColGhost;
-                    shouldPaint = true;
-                }
             }
 
             if (shouldPaint)
@@ -324,7 +299,15 @@ namespace Game.Common
             }
             else
             {
-                slot.mr.SetPropertyBlock(null);
+                // 如果不需要高亮，恢复 HexCell 的状态
+                if (slot.cell != null)
+                {
+                    slot.cell.RefreshFogVisuals();
+                }
+                else
+                {
+                    slot.mr.SetPropertyBlock(null);
+                }
             }
         }
 

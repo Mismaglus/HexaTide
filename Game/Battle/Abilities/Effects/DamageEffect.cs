@@ -38,7 +38,9 @@ namespace Game.Battle.Abilities.Effects
                 if (target == null) continue;
                 CombatResult result = CombatCalculator.CalculateDamage(source, target, this);
                 Debug.Log($"[DamageEffect] Hit {target.name} for {result.finalDamage}");
-                target.TakeDamage(result.finalDamage);
+
+                // ⭐ 修改：传入 isCritical 标志
+                target.TakeDamage(result.finalDamage, source, result.isCritical);
             }
         }
 

@@ -1,11 +1,14 @@
 using UnityEngine;
 using System.Collections;
+using Game.Common;      // 引用 CameraShakeController
+using Game.UI.Feedback; // 引用 FloatingTextManager
 
 namespace Game.Units
 {
     /// <summary>
     /// 通用视觉反馈控制器。
     /// 支持在“纯代码过程动画”和“Animator美术动画”之间一键切换。
+    /// 现已集成飘字和震动反馈。
     /// </summary>
     public class UnitVisualFeedback : MonoBehaviour
     {
@@ -25,11 +28,16 @@ namespace Game.Units
         public float hitShakeDuration = 0.15f; // 受击震动时间
         public float hitShakeAmount = 0.08f;   // 受击震动幅度
 
-        [Header("Procedural Settings (Knockback)")]
+        [Header("Knockback Settings")]
         [Tooltip("击退滑行时，模型向后仰的角度 (负值表示后仰)")]
         public float knockbackTilt = -15f;
         [Tooltip("击退时的抛物线高度 (0 = 贴地滑行, >0 = 被打飞)")]
         public float knockbackJumpHeight = 0.0f;
+
+        [Header("Visual Juice")]
+        public bool enableCameraShake = true;
+        public float hitShakeIntensity = 0.2f;
+        public float critShakeIntensity = 0.4f;
 
         [Header("Animator Settings (Art Only)")]
         public string animAttackTrigger = "Attack";
@@ -42,7 +50,7 @@ namespace Game.Units
         private Quaternion _originalRot;
         private MaterialPropertyBlock _mpb;
 
-        // ⭐ 修复核心：追踪当前正在运行的协程
+        // 追踪当前正在运行的协程
         private Coroutine _activeRoutine;
 
         void Awake()
@@ -81,7 +89,7 @@ namespace Game.Units
                 StopCoroutine(_activeRoutine);
             }
 
-            // 2. ⭐ 关键：每次打断旧动作时，必须强制重置状态 (颜色、位置)
+            // 2. 每次打断旧动作时，必须强制重置状态 (颜色、位置)
             ResetVisuals();
             ResetColor();
 
@@ -155,8 +163,26 @@ namespace Game.Units
             yield break; // Attack 不需要像 Knockback 那样返回 handle，外部等待时间即可
         }
 
-        public void PlayHit()
+        // ⭐ 修改：接收伤害数值和暴击标记
+        public void PlayHit(int damage = 0, bool isCrit = false)
         {
+            // 1. 飘字 (Floating Text)
+            if (FloatingTextManager.Instance != null && damage > 0)
+            {
+                // 在头顶稍微高一点的位置生成
+                Vector3 spawnPos = transform.position + Vector3.up * 1.8f;
+                FloatingTextManager.Instance.ShowDamage(spawnPos, damage, isCrit);
+            }
+
+            // 2. 震屏 (Camera Shake)
+            if (enableCameraShake && CameraShakeController.Instance != null)
+            {
+                float intensity = isCrit ? critShakeIntensity : hitShakeIntensity;
+                // 震动时间固定 0.2s 即可，产生瞬间冲击感
+                CameraShakeController.Instance.Shake(intensity, 0.2f);
+            }
+
+            // 3. 模型闪烁/震动 (Visual Animation)
             IEnumerator Routine()
             {
                 if (useProcedural)
@@ -195,8 +221,18 @@ namespace Game.Units
             StartNewRoutine(Routine());
         }
 
+        // ⭐ 新增：治疗反馈
+        public void PlayHeal(int amount)
+        {
+            if (FloatingTextManager.Instance != null && amount > 0)
+            {
+                Vector3 spawnPos = transform.position + Vector3.up * 1.8f;
+                FloatingTextManager.Instance.ShowHeal(spawnPos, amount);
+            }
+            // 以后可以在这里加绿色粒子特效
+        }
+
         // === 3. 击退反馈 (协程) ===
-        // ⭐⭐⭐ 修复：返回类型改为 Coroutine，这样可以直接返回 _activeRoutine ⭐⭐⭐
         public Coroutine PlayKnockback(Vector3 startPos, Vector3 endPos, float duration)
         {
             IEnumerator Routine()
@@ -239,7 +275,6 @@ namespace Game.Units
 
             StartNewRoutine(Routine());
 
-            // 返回刚刚启动的协程对象，外部可以直接 yield return 它
             return _activeRoutine;
         }
     }

@@ -4,7 +4,7 @@ using Game.Units;
 using Game.Core;
 using Game.Battle.Abilities;
 using Game.Grid;
-using Game.Battle.Status; // 引用 Status 命名空间
+using Game.Battle.Status;
 
 namespace Game.Battle
 {
@@ -126,7 +126,8 @@ namespace Game.Battle
         }
 
         // === 受伤逻辑 ===
-        public void TakeDamage(int amount, BattleUnit attacker = null)
+        // ⭐ 修改：增加 isCrit 参数，用于飘字和震屏区分
+        public void TakeDamage(int amount, BattleUnit attacker = null, bool isCrit = false)
         {
             if (Attributes.Core.HP <= 0) return;
 
@@ -140,13 +141,13 @@ namespace Game.Battle
             Attributes.Core.HP = Mathf.Max(0, Attributes.Core.HP - amount);
             NotifyStateChange();
 
-            Debug.Log($"{name} took {amount} damage. HP: {Attributes.Core.HP}/{Attributes.Core.HPMax}");
+            Debug.Log($"{name} took {amount} damage{(isCrit ? " (Crit)" : "")}. HP: {Attributes.Core.HP}/{Attributes.Core.HPMax}");
 
             // 3. 反应或死亡
             if (Attributes.Core.HP > 0)
             {
-                // ⭐ 触发通用受击反馈 (变红/震动 或 播放 GetHit)
-                if (_visualFeedback) _visualFeedback.PlayHit();
+                // ⭐ 触发通用受击反馈，传递具体伤害和暴击信息
+                if (_visualFeedback) _visualFeedback.PlayHit(amount, isCrit);
             }
             else
             {
@@ -154,12 +155,10 @@ namespace Game.Battle
             }
         }
 
-        // 在 BattleUnit.cs 中添加
-
         // === 治疗逻辑 ===
         public void Heal(int amount)
         {
-            if (Attributes.Core.HP <= 0) return; // 尸体通常无法治疗，除非是复活技能(另作处理)
+            if (Attributes.Core.HP <= 0) return; // 尸体通常无法治疗
             if (amount <= 0) return;
 
             int current = Attributes.Core.HP;
@@ -176,18 +175,12 @@ namespace Game.Battle
             Attributes.Core.HP += actualHeal;
             NotifyStateChange();
 
-            // 简单的日志反馈
-            if (actualHeal < amount)
-            {
-                Debug.Log($"<color=green>{name} healed for {actualHeal} (Overheal: {amount - actualHeal}). HP: {Attributes.Core.HP}/{max}</color>");
-            }
-            else
+            if (actualHeal > 0)
             {
                 Debug.Log($"<color=green>{name} healed for {actualHeal}. HP: {Attributes.Core.HP}/{max}</color>");
+                // ⭐ 触发治疗飘字
+                if (_visualFeedback) _visualFeedback.PlayHeal(actualHeal);
             }
-
-            // TODO: 这里可以添加绿色飘字或者治疗特效播放
-            // if (_visualFeedback) _visualFeedback.PlayHeal(); 
         }
 
         private void Die()

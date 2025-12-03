@@ -19,7 +19,7 @@ namespace Game.UI.Feedback
         private float _timer;
         private Color _startColor;
         private Vector3 _startPos;
-        private bool _active;
+        // private bool _active;
 
         void Awake()
         {
@@ -33,7 +33,7 @@ namespace Game.UI.Feedback
             _startColor = color;
 
             transform.localScale = Vector3.one * sizeScale;
-            _active = true;
+            // _active = true;
             _timer = 0f;
 
             // Start animation

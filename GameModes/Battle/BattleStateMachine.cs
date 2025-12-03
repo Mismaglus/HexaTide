@@ -1,3 +1,4 @@
+// Scripts/GameModes/Battle/BattleStateMachine.cs
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -130,15 +131,26 @@ namespace Game.Battle
             CheckBattleOutcome();
         }
 
+        // ⭐⭐⭐ 核心逻辑修改：胜负判定 ⭐⭐⭐
         void CheckBattleOutcome()
         {
-            if (_playerUnits.Count == 0)
+            // 1. 失败判定：
+            // 检查玩家队伍中是否还有“非召唤物”角色存活
+            // 如果所有剩下的全是召唤物，或者列表为空，则失败
+            bool hasRealPlayerCharacter = _playerUnits.Any(u => u != null && !u.isSummon);
+
+            if (!hasRealPlayerCharacter)
             {
-                EndBattle(false);
+                EndBattle(false); // Defeat
+                return;
             }
-            else if (_enemyUnits.Count == 0)
+
+            // 2. 胜利判定：
+            // 所有敌人阵亡
+            if (_enemyUnits.Count == 0)
             {
-                EndBattle(true);
+                EndBattle(true); // Victory
+                return;
             }
         }
 
@@ -175,7 +187,7 @@ namespace Game.Battle
             if (CurrentTurn != TurnSide.Player) return;
             if (_enemyTurnRoutine != null) return;
 
-            // ⭐ 1. 结算玩家回合结束的效果 (Night Cinders 触发点)
+            // 1. 结算玩家回合结束的效果 (Night Cinders 触发点)
             EndCurrentTurn(TurnSide.Player);
 
             // 2. 启动敌人回合
@@ -196,7 +208,7 @@ namespace Game.Battle
                 if (_isBattleEnded) yield break;
             }
 
-            // ⭐ 4. 结算敌人回合结束的效果
+            // 4. 结算敌人回合结束的效果
             EndCurrentTurn(TurnSide.Enemy);
 
             // 5. 回到玩家回合
@@ -231,7 +243,7 @@ namespace Game.Battle
             Debug.Log($"⚡ Turn Start: {side}");
         }
 
-        // ⭐⭐⭐ 新增：回合结束结算逻辑 ⭐⭐⭐
+        // 回合结束结算逻辑
         void EndCurrentTurn(TurnSide side)
         {
             var unitsSnapshot = GetUnitsFor(side).ToArray();

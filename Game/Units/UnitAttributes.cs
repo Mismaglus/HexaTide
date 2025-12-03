@@ -1,3 +1,4 @@
+// Scripts/Game/Units/UnitAttributes.cs
 using System;
 using UnityEngine;
 
@@ -111,12 +112,15 @@ namespace Game.Units
             public int SenseRangeBonus;
             public bool RequiresLoS;
 
-            // ⭐ 新增：是否有能力看到未来（黄色）意图
             [Tooltip("If true, this unit can see Future (Yellow/Orange) intents.")]
             public bool CanSeeFutureIntents;
 
-            public static OptionalAttributes Default() => new OptionalAttributes { SightRange = 6, SenseRangeBonus = 2, RequiresLoS = true, CanSeeFutureIntents = false };
-            public void Clamp() { Shield = Mathf.Max(0, Shield); SenseRangeBonus = Mathf.Max(0, SenseRangeBonus); }
+            // ⭐ 新增：背包最大槽位
+            [Tooltip("Max items this unit can carry.")]
+            [Min(0)] public int MaxInventorySlots;
+
+            public static OptionalAttributes Default() => new OptionalAttributes { SightRange = 6, SenseRangeBonus = 2, RequiresLoS = true, CanSeeFutureIntents = false, MaxInventorySlots = 5 };
+            public void Clamp() { Shield = Mathf.Max(0, Shield); SenseRangeBonus = Mathf.Max(0, SenseRangeBonus); MaxInventorySlots = Mathf.Max(0, MaxInventorySlots); }
         }
     }
 }

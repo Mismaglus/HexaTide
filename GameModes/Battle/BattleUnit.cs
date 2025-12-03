@@ -1,3 +1,4 @@
+// Scripts/GameModes/Battle/BattleUnit.cs
 using UnityEngine;
 using System.Collections.Generic;
 using Game.Units;
@@ -21,13 +22,17 @@ namespace Game.Battle
         public bool isPlayer => UnitRef.Faction != null && UnitRef.Faction.side == Side.Player;
         public bool IsPlayerControlled => UnitRef.IsPlayerControlled;
 
+        [Header("Classification")]
+        [Tooltip("如果勾选，该单位视为召唤物。玩家的所有'非召唤物'角色死亡时判负，召唤物存活不计入。")]
+        public bool isSummon = false; // ⭐ 新增：召唤物标记
+
         private UnitAttributes _attributes;
         public UnitAttributes Attributes => _attributes ? _attributes : (_attributes = GetComponent<UnitAttributes>());
 
         private UnitStatusController _statusController;
         public UnitStatusController Status => _statusController ? _statusController : (_statusController = GetComponent<UnitStatusController>());
 
-        // ⭐ 新增：视觉反馈组件引用
+        // 视觉反馈组件引用
         private UnitVisualFeedback _visualFeedback;
 
         public event System.Action OnResourcesChanged;
@@ -61,7 +66,7 @@ namespace Game.Battle
             _animator = GetComponentInChildren<Animator>();
             _statusController = GetComponent<UnitStatusController>();
 
-            // ⭐ 获取通用反馈组件
+            // 获取通用反馈组件
             _visualFeedback = GetComponent<UnitVisualFeedback>();
         }
 
@@ -126,7 +131,6 @@ namespace Game.Battle
         }
 
         // === 受伤逻辑 ===
-        // ⭐ 修改：增加 isCrit 参数，用于飘字和震屏区分
         public void TakeDamage(int amount, BattleUnit attacker = null, bool isCrit = false)
         {
             if (Attributes.Core.HP <= 0) return;
@@ -146,7 +150,7 @@ namespace Game.Battle
             // 3. 反应或死亡
             if (Attributes.Core.HP > 0)
             {
-                // ⭐ 触发通用受击反馈，传递具体伤害和暴击信息
+                // 触发通用受击反馈，传递具体伤害和暴击信息
                 if (_visualFeedback) _visualFeedback.PlayHit(amount, isCrit);
             }
             else
@@ -178,7 +182,7 @@ namespace Game.Battle
             if (actualHeal > 0)
             {
                 Debug.Log($"<color=green>{name} healed for {actualHeal}. HP: {Attributes.Core.HP}/{max}</color>");
-                // ⭐ 触发治疗飘字
+                // 触发治疗飘字
                 if (_visualFeedback) _visualFeedback.PlayHeal(actualHeal);
             }
         }

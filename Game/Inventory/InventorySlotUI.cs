@@ -3,10 +3,11 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.EventSystems;
-using Game.Inventory; // 引用我们之前写的 InventoryItem
+using Game.Inventory;
 
 namespace Game.UI.Inventory
 {
+    [RequireComponent(typeof(Animator))] // 确保有 Animator
     public class InventorySlotUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
         [Header("Components")]
@@ -14,19 +15,25 @@ namespace Game.UI.Inventory
         public TextMeshProUGUI countText;
         public Button button;
 
-        [Header("Visuals")]
-        public GameObject selectionHighlight; // 选中框 (可选)
+        // [Header("Visuals")]
+        // public GameObject selectionHighlight; // ❌ 已移除：不再需要这个
+
+        [Header("Animator Settings")]
+        [Tooltip("Animator 中用于控制强制高亮的 Bool 参数名")]
+        public string activeBoolParam = "IsActive";
 
         private InventoryItem _item;
-        private int _index; // 在背包中的索引
+        private int _index;
+        public int Index => _index;
         private System.Action<int> _onClickCallback;
-
-        // 用于 Tooltip
+        private Animator _animator;
         private RectTransform _rect;
 
         void Awake()
         {
             _rect = GetComponent<RectTransform>();
+            _animator = GetComponent<Animator>(); // ⭐ 获取 Animator
+
             if (button)
             {
                 button.onClick.AddListener(OnClicked);
@@ -39,14 +46,15 @@ namespace Game.UI.Inventory
             _index = index;
             _onClickCallback = onClick;
 
+            // 重置高亮状态
+            SetHighlightState(false);
+
             if (_item != null)
             {
-                // 设置图标
                 iconImage.sprite = _item.icon;
                 iconImage.enabled = true;
-                iconImage.preserveAspect = true; // 保持图标比例
+                iconImage.preserveAspect = true;
 
-                // 设置数量 (如果 >1 则显示，否则隐藏)
                 if (count > 1)
                 {
                     countText.text = count.ToString();
@@ -56,12 +64,14 @@ namespace Game.UI.Inventory
                 {
                     countText.gameObject.SetActive(false);
                 }
+
+                if (button) button.interactable = true;
             }
             else
             {
-                // 空格子处理 (如果你的设计允许空格子)
                 iconImage.enabled = false;
                 countText.gameObject.SetActive(false);
+                if (button) button.interactable = false;
             }
         }
 
@@ -70,21 +80,26 @@ namespace Game.UI.Inventory
             _onClickCallback?.Invoke(_index);
         }
 
-        // === Tooltip 支持 (鼠标悬停) ===
+        // ⭐ 新增：外部控制高亮的方法
+        public void SetHighlightState(bool isActive)
+        {
+            if (_animator != null)
+            {
+                _animator.SetBool(activeBoolParam, isActive);
+            }
+        }
+
+        // === Tooltip ===
         public void OnPointerEnter(PointerEventData eventData)
         {
             if (_item == null) return;
-
-            // 这里暂时打印日志，或者你可以复用 SkillTooltipController
-            // 如果你有通用的 ItemTooltipController，在这里调用 Show
-            // Debug.Log($"Hover Item: {_item.LocalizedName}");
-
-            // TODO: 调用 TooltipController.ShowItem(_item, ...)
+            // 调用你的 TooltipController (如果有的话)
+            // TooltipController.Instance.Show(_item, ...);
         }
 
         public void OnPointerExit(PointerEventData eventData)
         {
-            // TODO: 调用 TooltipController.Hide()
+            // TooltipController.Instance.Hide();
         }
     }
 }

@@ -1,40 +1,44 @@
 // Scripts/UI/Game/Inventory/InventorySideBarUI.cs
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Inventory; // 引用 Backend
-using Game.Battle;    // 引用 SelectionManager
-using Game.Units;     // 引用 Unit
+using Game.Inventory;
+using Game.Battle;
+using Game.Units;
 
 namespace Game.UI.Inventory
 {
     public class InventorySideBarUI : MonoBehaviour
     {
         [Header("Settings")]
-        [Tooltip("这个侧边栏显示什么类型的物品？")]
         public ItemType targetType;
-        // 建议：左边栏选 Consumable，右边栏选 Relic
 
         [Header("References")]
-        public Transform contentRoot; // Scroll View/Viewport/Content 对象
-        public InventorySlotUI slotPrefab; // 上面做的 Slot Prefab
+        public Transform contentRoot;
+        public InventorySlotUI slotPrefab;
 
         [Header("System Refs")]
         public SelectionManager selectionManager;
 
-        // 缓存
+        // ⭐ 新增：引用 TargetingSystem 以便监听取消事件
+        public AbilityTargetingSystem targetingSystem;
+
         private UnitInventory _currentInventory;
         private List<InventorySlotUI> _activeSlots = new List<InventorySlotUI>();
 
+        // ⭐ 记录当前高亮的索引，用于互斥
+        private int _currentSelectedIndex = -1;
+
         void Start()
         {
-            // 自动查找 SelectionManager
             if (selectionManager == null)
                 selectionManager = FindFirstObjectByType<SelectionManager>(FindObjectsInactive.Exclude);
+
+            if (targetingSystem == null)
+                targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
 
             if (selectionManager != null)
             {
                 selectionManager.OnSelectedUnitChanged += HandleUnitChanged;
-                // 初始化当前选中
                 HandleUnitChanged(selectionManager.SelectedUnit);
             }
         }
@@ -48,16 +52,24 @@ namespace Game.UI.Inventory
                 _currentInventory.OnInventoryChanged -= Refresh;
         }
 
+        void Update()
+        {
+            // ⭐ 轮询检查：如果 TargetingSystem 退出了瞄准模式，我们也应该取消 UI 高亮
+            // (这是一个简单的防错机制，防止玩家右键取消瞄准后 UI 还亮着)
+            if (targetingSystem != null && !targetingSystem.IsTargeting && _currentSelectedIndex != -1)
+            {
+                ClearSelection();
+            }
+        }
+
         void HandleUnitChanged(Unit unit)
         {
-            // 1. 解绑旧背包
             if (_currentInventory != null)
             {
                 _currentInventory.OnInventoryChanged -= Refresh;
                 _currentInventory = null;
             }
 
-            // 2. 绑定新背包
             if (unit != null)
             {
                 _currentInventory = unit.GetComponent<UnitInventory>();
@@ -67,38 +79,30 @@ namespace Game.UI.Inventory
                 }
             }
 
-            // 3. 刷新界面
             Refresh();
         }
 
         void Refresh()
         {
-            // 清理旧格子
-            foreach (Transform child in contentRoot)
-            {
-                Destroy(child.gameObject);
-            }
+            // 记录旧的选中状态以便尝试恢复 (可选，这里先简单重置)
+            _currentSelectedIndex = -1;
+
+            foreach (Transform child in contentRoot) Destroy(child.gameObject);
             _activeSlots.Clear();
 
             if (_currentInventory == null) return;
 
-            // 遍历背包数据
             var slotsData = _currentInventory.Slots;
             for (int i = 0; i < slotsData.Count; i++)
             {
                 var data = slotsData[i];
                 if (data.IsEmpty) continue;
 
-                // ⭐ 核心过滤：只显示符合类型的物品
-                // 注意：这里我们允许 "Material" 显示在消耗品栏，或者你需要专门的 Type
-                // 简单的逻辑：如果 Target 是 Relic，只显示 Relic；如果是 Consumable，显示 Consumable
                 if (data.item.type != targetType) continue;
 
-                // 生成格子
                 var go = Instantiate(slotPrefab, contentRoot);
                 var ui = go.GetComponent<InventorySlotUI>();
 
-                // 传递数据 (注意传递真实的 index，以便回调时知道是背包里的第几个)
                 ui.Setup(data.item, data.count, i, OnSlotClicked);
 
                 _activeSlots.Add(ui);
@@ -108,40 +112,67 @@ namespace Game.UI.Inventory
         void OnSlotClicked(int inventoryIndex)
         {
             if (_currentInventory == null) return;
-
             var slotData = _currentInventory.Slots[inventoryIndex];
             if (slotData.IsEmpty) return;
 
             var item = slotData.item;
 
-            Debug.Log($"Clicked Item: {item.name} at index {inventoryIndex}");
-
-            // === 交互逻辑分支 ===
-
-            // 1. 如果是消耗品 -> 进入技能瞄准
-            if (item is ConsumableItem consumable)
+            // === 处理高亮互斥 ===
+            // 1. 找到对应的 UI 实例 (因为 _activeSlots 的顺序和 inventoryIndex 不一定对应，需要查找)
+            InventorySlotUI clickedUI = null;
+            foreach (var slotUI in _activeSlots)
             {
-                if (consumable.abilityToCast != null)
-                {
-                    // 找到瞄准系统
-                    var targeting = FindFirstObjectByType<Game.Battle.AbilityTargetingSystem>();
-                    if (targeting != null)
-                    {
-                        // 进入瞄准！
-                        // TODO: 这里有一个待解决的问题：
-                        // TargetingSystem 目前只接受 Ability。
-                        // 当技能释放成功时，我们还需要从背包里扣除这个物品。
-                        // 我们需要在 AbilityTargetingSystem 里加一个 "OnAbilityExecuted" 回调，
-                        // 或者创建一个特殊的 "ItemAbilityAction" 来处理扣除。
-
-                        // 临时方案：先能用再说，扣除逻辑稍后完善
-                        targeting.EnterTargetingMode(consumable.abilityToCast);
-                    }
-                }
+                // 这里有个小问题：Setup 里的 closure 存了 index，但我们没法直接从外部读取 slotUI 对应的 index
+                // 简单做法：Refresh 时把 inventoryIndex 存到 UI 组件里公开访问
+                // 或者：为了简单，我们这里全遍历一遍 SetHighlight(false)，然后只把点击的 SetHighlight(true)
             }
 
-            // 2. 如果是遗物 -> 也许显示详情或者允许卸下？
-            // 目前右侧栏点击遗物暂时不做任何“使用”操作
+            // ⭐ 既然 InventorySlotUI 没有公开 Index，我们改用更简单的“全关再开”策略
+            // 这要求我们在 Setup 时最好把 inventoryIndex 存为 InventorySlotUI 的一个属性
+            // 让我们假设 InventorySlotUI 有一个 public int Index { get; private set; }
+
+            // (为了不修改 InventorySlotUI 太多，我们这里暂时略过精确查找 UI 的逻辑，
+            // 直接在 OnSlotClicked 里做逻辑处理，高亮由 SlotUI 内部响应 SetHighlightState)
+
+            if (item is ConsumableItem consumable && consumable.abilityToCast != null)
+            {
+                if (targetingSystem != null)
+                {
+                    targetingSystem.EnterTargetingMode(consumable.abilityToCast);
+
+                    // 找到刚才点击的那个 UI 并高亮它
+                    // 我们需要在 Refresh 时建立 map 或者简单的遍历
+                    // 鉴于列表很短，遍历无妨
+                    UpdateHighlightVisuals(inventoryIndex);
+                    _currentSelectedIndex = inventoryIndex;
+                }
+            }
+        }
+
+        // ⭐ 辅助：更新所有格子的高亮状态
+        void UpdateHighlightVisuals(int selectedInventoryIndex)
+        {
+            foreach (var ui in _activeSlots)
+            {
+                if (ui.Index == selectedInventoryIndex)
+                {
+                    ui.SetHighlightState(true);
+                }
+                else
+                {
+                    ui.SetHighlightState(false);
+                }
+            }
+        }
+
+        void ClearSelection()
+        {
+            _currentSelectedIndex = -1;
+            // 遍历所有 UI 取消高亮
+            foreach (var ui in _activeSlots)
+            {
+                ui.SetHighlightState(false);
+            }
         }
     }
 }

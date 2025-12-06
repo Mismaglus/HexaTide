@@ -7,7 +7,7 @@ using Game.Inventory;
 
 namespace Game.UI.Inventory
 {
-    [RequireComponent(typeof(Animator))] // 确保有 Animator
+    // ⭐ 修改 1: 移除了 [RequireComponent(typeof(Animator))]
     public class InventorySlotUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
         [Header("Components")]
@@ -15,10 +15,10 @@ namespace Game.UI.Inventory
         public TextMeshProUGUI countText;
         public Button button;
 
-        // [Header("Visuals")]
-        // public GameObject selectionHighlight; // ❌ 已移除：不再需要这个
-
         [Header("Animator Settings")]
+        [Tooltip("请将子物体 HighlightAndSelect 上的 Animator 拖到这里")]
+        public Animator targetAnimator; // ⭐ 修改 2: 变为公开变量，允许手动指定
+
         [Tooltip("Animator 中用于控制强制高亮的 Bool 参数名")]
         public string activeBoolParam = "IsActive";
 
@@ -26,13 +26,17 @@ namespace Game.UI.Inventory
         private int _index;
         public int Index => _index;
         private System.Action<int> _onClickCallback;
-        private Animator _animator;
         private RectTransform _rect;
 
         void Awake()
         {
             _rect = GetComponent<RectTransform>();
-            _animator = GetComponent<Animator>(); // ⭐ 获取 Animator
+
+            // ⭐ 修改 3: 如果 Inspector 里没拖，尝试自动在子物体里找一个兜底
+            if (targetAnimator == null)
+            {
+                targetAnimator = GetComponentInChildren<Animator>();
+            }
 
             if (button)
             {
@@ -51,26 +55,32 @@ namespace Game.UI.Inventory
 
             if (_item != null)
             {
-                iconImage.sprite = _item.icon;
-                iconImage.enabled = true;
-                iconImage.preserveAspect = true;
-
-                if (count > 1)
+                if (iconImage)
                 {
-                    countText.text = count.ToString();
-                    countText.gameObject.SetActive(true);
+                    iconImage.sprite = _item.icon;
+                    iconImage.enabled = true;
+                    iconImage.preserveAspect = true;
                 }
-                else
+
+                if (countText)
                 {
-                    countText.gameObject.SetActive(false);
+                    if (count > 1)
+                    {
+                        countText.text = count.ToString();
+                        countText.gameObject.SetActive(true);
+                    }
+                    else
+                    {
+                        countText.gameObject.SetActive(false);
+                    }
                 }
 
                 if (button) button.interactable = true;
             }
             else
             {
-                iconImage.enabled = false;
-                countText.gameObject.SetActive(false);
+                if (iconImage) iconImage.enabled = false;
+                if (countText) countText.gameObject.SetActive(false);
                 if (button) button.interactable = false;
             }
         }
@@ -80,12 +90,12 @@ namespace Game.UI.Inventory
             _onClickCallback?.Invoke(_index);
         }
 
-        // ⭐ 新增：外部控制高亮的方法
         public void SetHighlightState(bool isActive)
         {
-            if (_animator != null)
+            // ⭐ 修改 4: 安全检查
+            if (targetAnimator != null)
             {
-                _animator.SetBool(activeBoolParam, isActive);
+                targetAnimator.SetBool(activeBoolParam, isActive);
             }
         }
 
@@ -93,7 +103,6 @@ namespace Game.UI.Inventory
         public void OnPointerEnter(PointerEventData eventData)
         {
             if (_item == null) return;
-            // 调用你的 TooltipController (如果有的话)
             // TooltipController.Instance.Show(_item, ...);
         }
 

@@ -58,7 +58,7 @@ namespace Game.UI.Inventory
         {
             // 查找场景中所有 BattleUnit
             var allUnits = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            
+
             // 筛选出属于玩家阵营的单位 (isPlayer == true)
             // 如果有多个玩家单位，默认取第一个 (单人游戏通常只有一个主角)
             var playerUnit = allUnits.FirstOrDefault(u => u.isPlayer);
@@ -70,10 +70,10 @@ namespace Game.UI.Inventory
                 {
                     // 订阅背包变化事件
                     _currentInventory.OnInventoryChanged += Refresh;
-                    
+
                     // 立即刷新一次 UI
                     Refresh();
-                    
+
                     _isBound = true;
                     Debug.Log($"[InventorySideBar] Successfully bound to player: {playerUnit.name}");
                 }

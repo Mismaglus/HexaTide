@@ -1,3 +1,4 @@
+// Scripts/Game/Battle/Abilities/AbilityTargetingSystem.cs
 using UnityEngine;
 using System.Collections.Generic;
 using Core.Hex;
@@ -6,6 +7,7 @@ using Game.Units;
 using Game.Battle.Abilities;
 using Game.Battle.Actions;
 using Game.UI;
+using Game.Inventory; // ⭐ 新增引用
 using UnityEngine.InputSystem;
 
 namespace Game.Battle
@@ -32,6 +34,9 @@ namespace Game.Battle
 
         private Ability _currentAbility;
         private BattleUnit _caster;
+        // ⭐ 新增：记录当前正在使用的物品
+        private InventoryItem _currentSourceItem;
+
         private HashSet<HexCoords> _validTiles = new HashSet<HexCoords>();
 
         public bool IsTargeting => _currentAbility != null;
@@ -51,7 +56,7 @@ namespace Game.Battle
 
         void OnEnable()
         {
-            if (skillBarController) skillBarController.OnAbilitySelected += EnterTargetingMode;
+            if (skillBarController) skillBarController.OnAbilitySelected += HandleSkillBarSelection;
             if (input)
             {
                 input.OnTileClicked += HandleTileClicked;
@@ -61,7 +66,7 @@ namespace Game.Battle
 
         void OnDisable()
         {
-            if (skillBarController) skillBarController.OnAbilitySelected -= EnterTargetingMode;
+            if (skillBarController) skillBarController.OnAbilitySelected -= HandleSkillBarSelection;
             if (input)
             {
                 input.OnTileClicked -= HandleTileClicked;
@@ -69,24 +74,32 @@ namespace Game.Battle
             }
         }
 
-        public void EnterTargetingMode(Ability ability)
+        // 技能栏点击的回调（没有 SourceItem）
+        void HandleSkillBarSelection(Ability ability)
+        {
+            EnterTargetingMode(ability, null);
+        }
+
+        // ⭐ 修复：增加可选参数 sourceItem，解决 CS1501 错误
+        public void EnterTargetingMode(Ability ability, InventoryItem sourceItem = null)
         {
             var unit = selectionManager.SelectedUnit;
             if (unit == null) return;
 
             _caster = unit.GetComponent<BattleUnit>();
+            _currentSourceItem = sourceItem; // 记录来源
 
-            // ⭐ 新增：即时技能逻辑
+            // 即时技能逻辑
             if (ability.triggerImmediately)
             {
-                ExecuteImmediate(ability, _caster);
-                return; // 直接返回，不进入瞄准状态
+                ExecuteImmediate(ability, _caster, sourceItem);
+                return;
             }
 
             _currentAbility = ability;
             _validTiles.Clear();
 
-            Debug.Log($"[Targeting] Enter: {_currentAbility.name}");
+            Debug.Log($"[Targeting] Enter: {_currentAbility.name} (Source: {sourceItem?.name ?? "SkillBar"})");
 
             var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
             foreach (var t in rangeTiles) _validTiles.Add(t);
@@ -103,8 +116,8 @@ namespace Game.Battle
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
-        // ⭐ 执行即时技能
-        private void ExecuteImmediate(Ability ability, BattleUnit caster)
+        // ⭐ 同样传递 sourceItem
+        private void ExecuteImmediate(Ability ability, BattleUnit caster, InventoryItem sourceItem)
         {
             if (!ability.CanUse(caster))
             {
@@ -112,34 +125,28 @@ namespace Game.Battle
                 return;
             }
 
-            // 构造上下文：默认以自身为原点
             var ctx = new AbilityContext
             {
                 Caster = caster,
-                Origin = caster.UnitRef.Coords
+                Origin = caster.UnitRef.Coords,
+                SourceItem = sourceItem // 注入上下文
             };
 
-            // 如果目标类型是 Self，自动把这自己加进去 (方便 Effect 处理)
             if (ability.targetType == AbilityTargetType.Self)
             {
                 ctx.TargetUnits.Add(caster);
                 ctx.TargetTiles.Add(caster.UnitRef.Coords);
             }
-            // 如果是 PBAoE (Point Blank AoE)，原点也是自己
             else
             {
-                // 对于非 Self 的即时技能 (比如周身AOE)，我们只设 Origin，TargetUnits 由 AbilityEffect 自己去 Gather
                 ctx.TargetTiles.Add(caster.UnitRef.Coords);
             }
 
             Debug.Log($"[Targeting] Immediate Fire: {ability.name}");
 
-            // 入队执行
             var action = new AbilityAction(ability, ctx, abilityRunner);
             actionQueue.Enqueue(action);
             StartCoroutine(actionQueue.RunAll());
-
-            // 不需要 CancelTargeting，因为压根没进去
         }
 
         private bool CheckContentValidity(HexCoords coords)
@@ -213,7 +220,8 @@ namespace Game.Battle
             var ctx = new AbilityContext
             {
                 Caster = _caster,
-                Origin = casterUnit.Coords
+                Origin = casterUnit.Coords,
+                SourceItem = _currentSourceItem // ⭐ 注入
             };
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
@@ -232,6 +240,7 @@ namespace Game.Battle
         {
             _currentAbility = null;
             _caster = null;
+            _currentSourceItem = null; // 清理
             _validTiles.Clear();
 
             if (gridCursor) gridCursor.Hide();

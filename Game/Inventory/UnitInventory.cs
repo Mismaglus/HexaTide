@@ -1,8 +1,8 @@
 // Scripts/Game/Inventory/UnitInventory.cs
 using System.Collections.Generic;
 using UnityEngine;
-using Game.Battle; // for BattleUnit
-using Game.Units;  // for UnitAttributes
+using Game.Battle;
+using Game.Units;
 
 namespace Game.Inventory
 {
@@ -23,25 +23,15 @@ namespace Game.Inventory
             public void Clear() { item = null; count = 0; }
         }
 
-        [Header("Runtime Data")]
+        [Header("Runtime Storage")]
         [SerializeField] private List<Slot> slots = new List<Slot>();
+
+        public event System.Action OnInventoryChanged;
 
         private BattleUnit _battleUnit;
         private UnitAttributes _attrs;
 
-        // UI 监听事件
-        public event System.Action OnInventoryChanged;
-
-        public int Capacity => _attrs != null ? _attrs.Optional.MaxInventorySlots : 0;
-        public int ItemCount
-        {
-            get
-            {
-                int c = 0;
-                foreach (var s in slots) if (!s.IsEmpty) c++;
-                return c;
-            }
-        }
+        public int Capacity => _attrs != null ? _attrs.Optional.MaxInventorySlots : 20;
 
         public IReadOnlyList<Slot> Slots => slots;
 
@@ -49,12 +39,6 @@ namespace Game.Inventory
         {
             _battleUnit = GetComponent<BattleUnit>();
             _attrs = GetComponent<UnitAttributes>();
-        }
-
-        void Start()
-        {
-            // 确保 Slot 列表大小匹配容量 (可选，或者动态增长)
-            // 这里我们采用动态列表，但受 Capacity 限制
         }
 
         /// <summary>
@@ -65,7 +49,7 @@ namespace Game.Inventory
         {
             if (item == null || amount <= 0) return false;
 
-            // 1. 尝试堆叠
+            // 1. 尝试堆叠 (Stacking)
             if (item.isStackable)
             {
                 foreach (var slot in slots)
@@ -74,8 +58,10 @@ namespace Game.Inventory
                     {
                         int space = item.maxStack - slot.count;
                         int toAdd = Mathf.Min(space, amount);
+
                         slot.count += toAdd;
                         amount -= toAdd;
+
                         if (amount <= 0)
                         {
                             NotifyChange();
@@ -85,22 +71,24 @@ namespace Game.Inventory
                 }
             }
 
-            // 2. 放入新格子 (如果还有剩余 amount)
+            // 2. 放入新格子 (New Slot)
             while (amount > 0)
             {
-                if (ItemCount >= Capacity)
+                if (slots.Count >= Capacity)
                 {
                     Debug.LogWarning($"[Inventory] {name} is full! Cannot add {item.name}");
-                    return false; // 背包满
+                    NotifyChange();
+                    return false;
                 }
 
-                var newSlot = new Slot { item = item, count = Mathf.Min(amount, item.maxStack) };
+                int toAdd = Mathf.Min(amount, item.maxStack);
+                var newSlot = new Slot { item = item, count = toAdd };
                 slots.Add(newSlot);
 
                 // 触发物品的“获得”回调 (遗物生效)
                 item.OnAcquire(_battleUnit);
 
-                amount -= newSlot.count;
+                amount -= toAdd;
             }
 
             NotifyChange();
@@ -118,21 +106,22 @@ namespace Game.Inventory
             if (slot.IsEmpty) return;
 
             slot.count -= amount;
+
             if (slot.count <= 0)
             {
                 // 彻底移除
-                InventoryItem removedItem = slot.item;
+                InventoryItem itemRef = slot.item;
                 slots.RemoveAt(index);
 
                 // 触发物品的“移除”回调 (遗物失效)
-                removedItem.OnRemove(_battleUnit);
+                if (itemRef != null) itemRef.OnRemove(_battleUnit);
             }
 
             NotifyChange();
         }
 
         /// <summary>
-        /// 丢弃物品 (逻辑同移除，但未来可能加上掉落在地上的逻辑)
+        /// 丢弃物品
         /// </summary>
         public void DropItem(int index)
         {
@@ -140,34 +129,57 @@ namespace Game.Inventory
         }
 
         /// <summary>
-        /// 消耗物品 (通常由 ConsumableItem 调用)
+        /// 消耗物品 (索引版本，通常由 UI 直接调用)
         /// </summary>
         public void ConsumeItem(int index)
         {
             if (index < 0 || index >= slots.Count) return;
-            var slot = slots[index];
-            if (slot.IsEmpty) return;
-
-            // 检查是否是消耗品
-            if (slot.item is ConsumableItem cons && cons.consumeOnUse)
+            if (slots[index].item is ConsumableItem c && c.consumeOnUse)
             {
                 RemoveItemAt(index, 1);
             }
         }
 
-        void NotifyChange()
+        /// <summary>
+        /// 消耗物品 (对象版本，通常由 AbilityAction 调用)
+        /// ⭐ 这是你需要的新方法
+        /// </summary>
+        public void ConsumeItem(InventoryItem item, int amount = 1)
+        {
+            // 简单逻辑：找到第一个匹配的格子并扣除
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (slots[i].item == item)
+                {
+                    RemoveItemAt(i, amount);
+                    return;
+                }
+            }
+        }
+
+        private void NotifyChange()
         {
             OnInventoryChanged?.Invoke();
         }
 
         // 调试用
-        [ContextMenu("Add Test Potion")]
+        [ContextMenu("Add Test Potion (Editor Only)")]
         void DebugAddPotion()
         {
 #if UNITY_EDITOR
-            var p = UnityEditor.AssetDatabase.LoadAssetAtPath<InventoryItem>("Assets/_Assets/Items/Consumable/BasicPotion.asset");
-            if (p != null) TryAddItem(p);
-            else Debug.LogWarning("Could not find BasicPotion_C at Assets/_Assets/Items/Consumable/BasicPotion.asset");
+            // 尝试加载一个示例药水
+            string[] guids = UnityEditor.AssetDatabase.FindAssets("t:ConsumableItem");
+            if (guids.Length > 0)
+            {
+                var path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[0]);
+                var item = UnityEditor.AssetDatabase.LoadAssetAtPath<InventoryItem>(path);
+                TryAddItem(item, 1);
+                Debug.Log($"[Debug] Added {item.name}");
+            }
+            else
+            {
+                Debug.LogWarning("No ConsumableItem found in project!");
+            }
 #endif
         }
     }

@@ -6,10 +6,6 @@ using Game.Units;
 
 namespace Game.Inventory
 {
-    /// <summary>
-    /// 每个单位独立的背包组件。
-    /// 负责存储物品实例，并在添加/移除时触发 OnAcquire/OnRemove 回调。
-    /// </summary>
     [RequireComponent(typeof(BattleUnit))]
     public class UnitInventory : MonoBehaviour
     {
@@ -41,10 +37,6 @@ namespace Game.Inventory
             _attrs = GetComponent<UnitAttributes>();
         }
 
-        /// <summary>
-        /// 尝试添加物品。
-        /// </summary>
-        /// <returns>如果是新占用了格子且格子不够，返回 false</returns>
         public bool TryAddItem(InventoryItem item, int amount = 1)
         {
             if (item == null || amount <= 0) return false;
@@ -77,6 +69,7 @@ namespace Game.Inventory
                 if (slots.Count >= Capacity)
                 {
                     Debug.LogWarning($"[Inventory] {name} is full! Cannot add {item.name}");
+                    // 即使只加了一部分也刷新，或者你可以选择回滚
                     NotifyChange();
                     return false;
                 }
@@ -95,9 +88,6 @@ namespace Game.Inventory
             return true;
         }
 
-        /// <summary>
-        /// 移除物品（指定索引）
-        /// </summary>
         public void RemoveItemAt(int index, int amount = 1)
         {
             if (index < 0 || index >= slots.Count) return;
@@ -120,17 +110,12 @@ namespace Game.Inventory
             NotifyChange();
         }
 
-        /// <summary>
-        /// 丢弃物品
-        /// </summary>
         public void DropItem(int index)
         {
             RemoveItemAt(index, 999); // 全部丢弃
         }
 
-        /// <summary>
-        /// 消耗物品 (索引版本，通常由 UI 直接调用)
-        /// </summary>
+        // 索引版本 (UI 直接调用时使用)
         public void ConsumeItem(int index)
         {
             if (index < 0 || index >= slots.Count) return;
@@ -140,10 +125,8 @@ namespace Game.Inventory
             }
         }
 
-        /// <summary>
-        /// 消耗物品 (对象版本，通常由 AbilityAction 调用)
-        /// ⭐ 这是你需要的新方法
-        /// </summary>
+        // ⭐ 对象版本 (AbilityAction 调用这个)
+        // 之前被截断的部分就在这里
         public void ConsumeItem(InventoryItem item, int amount = 1)
         {
             // 简单逻辑：找到第一个匹配的格子并扣除
@@ -152,9 +135,10 @@ namespace Game.Inventory
                 if (slots[i].item == item)
                 {
                     RemoveItemAt(i, amount);
-                    return;
+                    return; // 找到并扣除后立即返回，不继续查找
                 }
             }
+            Debug.LogWarning($"[UnitInventory] 试图消耗 {item.name} 但背包中未找到该物品！");
         }
 
         private void NotifyChange()

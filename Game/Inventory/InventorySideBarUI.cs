@@ -64,12 +64,6 @@ namespace Game.UI.Inventory
             if (targetingSystem != null) return;
 
             targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
-
-            // 如果找到了，打印一条日志确认
-            if (targetingSystem != null)
-            {
-                // Debug.Log("[InventorySideBar] TargetingSystem connected.");
-            }
         }
 
         void OnDestroy()
@@ -92,7 +86,10 @@ namespace Game.UI.Inventory
                 _currentInventory = playerUnit.GetComponent<UnitInventory>();
                 if (_currentInventory != null)
                 {
+                    // 先取消订阅防止重复，再订阅
+                    _currentInventory.OnInventoryChanged -= Refresh;
                     _currentInventory.OnInventoryChanged += Refresh;
+
                     Refresh();
 
                     _isPlayerBound = true;
@@ -104,30 +101,34 @@ namespace Game.UI.Inventory
         // 刷新列表显示
         void Refresh()
         {
-            // 清空旧 UI
-            foreach (Transform child in contentRoot) Destroy(child.gameObject);
+            // 1. 清空旧 UI
+            foreach (Transform child in contentRoot)
+            {
+                Destroy(child.gameObject);
+            }
             _activeSlots.Clear();
             _currentSelectedIndex = -1;
 
             if (_currentInventory == null) return;
 
-            // 遍历背包数据
+            // 2. 遍历背包数据
             var slotsData = _currentInventory.Slots;
             for (int i = 0; i < slotsData.Count; i++)
             {
                 var data = slotsData[i];
+                // 跳过空格子
                 if (data.IsEmpty) continue;
 
                 // 类型过滤
                 if (data.item.type != targetType) continue;
 
-                // 生成格子
+                // 3. 生成格子
                 var go = Instantiate(slotPrefab, contentRoot);
                 var ui = go.GetComponent<InventorySlotUI>();
 
                 if (ui != null)
                 {
-                    // 传递真实的背包索引 i
+                    // 传递数据
                     ui.Setup(data.item, data.count, i, OnSlotClicked);
                     _activeSlots.Add(ui);
                 }
@@ -155,7 +156,8 @@ namespace Game.UI.Inventory
                 {
                     if (targetingSystem != null)
                     {
-                        // 进入瞄准模式
+                        // ⭐ 这里的调用需要 AbilityTargetingSystem 支持第二个参数 (SourceItem)
+                        // 这就是报错 CS1501 的原因，请务必更新 AbilityTargetingSystem.cs
                         targetingSystem.EnterTargetingMode(consumable.abilityToCast, consumable);
 
                         // 设置 UI 高亮

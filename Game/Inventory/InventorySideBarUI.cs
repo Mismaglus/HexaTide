@@ -33,7 +33,7 @@ namespace Game.UI.Inventory
         {
             // 尝试初始化系统引用
             ResolveTargetingSystem();
-            
+
             // 尝试寻找并绑定玩家背包
             FindAndBindPlayerInventory();
         }
@@ -64,7 +64,7 @@ namespace Game.UI.Inventory
             if (targetingSystem != null) return;
 
             targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
-            
+
             // 如果找到了，打印一条日志确认
             if (targetingSystem != null)
             {
@@ -83,7 +83,7 @@ namespace Game.UI.Inventory
         {
             // 查找场景中所有 BattleUnit
             var allUnits = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            
+
             // 筛选出属于玩家阵营的单位
             var playerUnit = allUnits.FirstOrDefault(u => u.isPlayer);
 
@@ -94,7 +94,7 @@ namespace Game.UI.Inventory
                 {
                     _currentInventory.OnInventoryChanged += Refresh;
                     Refresh();
-                    
+
                     _isPlayerBound = true;
                     Debug.Log($"[InventorySideBar] Successfully bound to player: {playerUnit.name}");
                 }
@@ -157,7 +157,7 @@ namespace Game.UI.Inventory
                     {
                         // 进入瞄准模式
                         targetingSystem.EnterTargetingMode(consumable.abilityToCast, consumable);
-                        
+
                         // 设置 UI 高亮
                         UpdateHighlightVisuals(inventoryIndex);
                         _currentSelectedIndex = inventoryIndex;

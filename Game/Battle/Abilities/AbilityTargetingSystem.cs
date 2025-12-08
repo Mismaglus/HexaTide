@@ -74,13 +74,13 @@ namespace Game.Battle
             }
         }
 
-        // 技能栏点击的回调（没有 SourceItem）
+        // 技能栏点击（没有来源物品）
         void HandleSkillBarSelection(Ability ability)
         {
             EnterTargetingMode(ability, null);
         }
 
-        // ⭐ 修复：增加可选参数 sourceItem，解决 CS1501 错误
+        // ⭐ 核心修改：支持传入 sourceItem
         public void EnterTargetingMode(Ability ability, InventoryItem sourceItem = null)
         {
             var unit = selectionManager.SelectedUnit;
@@ -89,7 +89,8 @@ namespace Game.Battle
             _caster = unit.GetComponent<BattleUnit>();
             _currentSourceItem = sourceItem; // 记录来源
 
-            // 即时技能逻辑
+            // 如果配置了 Trigger Immediately，则跳过瞄准直接执行
+            // 注意：对于药水，建议把这个勾选去掉，以便让玩家有机会“确认”
             if (ability.triggerImmediately)
             {
                 ExecuteImmediate(ability, _caster, sourceItem);
@@ -101,11 +102,12 @@ namespace Game.Battle
 
             Debug.Log($"[Targeting] Enter: {_currentAbility.name} (Source: {sourceItem?.name ?? "SkillBar"})");
 
+            // 计算有效范围
             var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
             foreach (var t in rangeTiles) _validTiles.Add(t);
 
+            // 视觉反馈
             highlighter.ClearAll();
-
             if (outlineManager)
             {
                 outlineManager.SetAbilityRange(_validTiles);
@@ -129,7 +131,7 @@ namespace Game.Battle
             {
                 Caster = caster,
                 Origin = caster.UnitRef.Coords,
-                SourceItem = sourceItem // 注入上下文
+                SourceItem = sourceItem // 注入
             };
 
             if (ability.targetType == AbilityTargetType.Self)
@@ -143,10 +145,11 @@ namespace Game.Battle
             }
 
             Debug.Log($"[Targeting] Immediate Fire: {ability.name}");
-
             var action = new AbilityAction(ability, ctx, abilityRunner);
             actionQueue.Enqueue(action);
             StartCoroutine(actionQueue.RunAll());
+
+            // 这里不需要 ClearSelection，因为还没进入瞄准状态
         }
 
         private bool CheckContentValidity(HexCoords coords)
@@ -155,6 +158,7 @@ namespace Game.Battle
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             var casterUnit = _caster.GetComponent<Unit>();
 
+            // 特殊处理 Self：允许点击自己所在的格子
             if (_currentAbility.targetType == AbilityTargetType.Self)
             {
                 if (casterUnit != null && coords.Equals(casterUnit.Coords)) return true;
@@ -181,11 +185,13 @@ namespace Game.Battle
 
                 if (isContentValid && outlineManager)
                 {
+                    // 只有有效时才绘制意图
                     var aoeTiles = TargetingResolver.GetAOETiles(hoverC, _currentAbility, _caster.UnitRef.Coords);
                     Vector3 startPos = _caster.transform.position;
                     Vector3 endPos = grid.GetTileWorldPosition(hoverC);
 
                     bool isDirectionalAOE = _currentAbility.shape == TargetShape.Line || _currentAbility.shape == TargetShape.Cone;
+                    // 如果是自己点自己，不画箭头，只画格子
                     bool showArrow = !isDirectionalAOE && !hoverC.Equals(_caster.UnitRef.Coords);
 
                     outlineManager.ShowPlayerIntent(startPos, endPos, aoeTiles, showArrow);
@@ -210,10 +216,12 @@ namespace Game.Battle
             if (!_validTiles.Contains(coords)) return;
             if (!CheckContentValidity(coords)) return;
 
+            // 构造 Context
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             BattleUnit targetBattleUnit = targetUnit ? targetUnit.GetComponent<BattleUnit>() : null;
             var casterUnit = _caster.GetComponent<Unit>();
 
+            // 如果是 Self 技能且点了自己，把 targetBattleUnit 修正为自己
             if (_currentAbility.targetType == AbilityTargetType.Self && coords.Equals(casterUnit.Coords))
                 targetBattleUnit = _caster;
 
@@ -221,11 +229,12 @@ namespace Game.Battle
             {
                 Caster = _caster,
                 Origin = casterUnit.Coords,
-                SourceItem = _currentSourceItem // ⭐ 注入
+                SourceItem = _currentSourceItem // ⭐ 注入 SourceItem
             };
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
 
+            // 二次校验
             if (!_currentAbility.IsValidTarget(_caster, ctx)) return;
 
             Debug.Log($"[Targeting] Fire -> {coords}");
@@ -240,7 +249,7 @@ namespace Game.Battle
         {
             _currentAbility = null;
             _caster = null;
-            _currentSourceItem = null; // 清理
+            _currentSourceItem = null; // ⭐ 清空来源
             _validTiles.Clear();
 
             if (gridCursor) gridCursor.Hide();
@@ -265,6 +274,7 @@ namespace Game.Battle
         {
             if (IsTargeting)
             {
+                // 右键取消
                 if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                     CancelTargeting();
             }

@@ -2,7 +2,7 @@
 using System.Collections;
 using UnityEngine;
 using Game.Battle.Abilities;
-using Game.Inventory; // ⭐ 新增引用
+using Game.Inventory; // ⭐ 引用 Inventory
 
 namespace Game.Battle.Actions
 {
@@ -23,18 +23,22 @@ namespace Game.Battle.Actions
 
         public IEnumerator Execute()
         {
-            // 执行技能
+            // 1. 执行技能动画和效果
             yield return _ability.Execute(_ctx.Caster, _ctx, _runner);
 
-            // ⭐ 执行完毕后，检查是否需要扣除物品
+            // 2. ⭐ 技能结束后，检查是否需要扣除物品
             if (_ctx.SourceItem != null)
             {
-                ConsumeSourceItem(_ctx.Caster, _ctx.SourceItem);
+                TryConsumeSourceItem();
             }
         }
 
-        void ConsumeSourceItem(BattleUnit caster, InventoryItem item)
+        void TryConsumeSourceItem()
         {
+            var item = _ctx.SourceItem;
+            var caster = _ctx.Caster;
+
+            // 检查是否为消耗品且需要消耗
             if (item is ConsumableItem consumable && consumable.consumeOnUse)
             {
                 var inventory = caster.GetComponent<UnitInventory>();
@@ -42,7 +46,7 @@ namespace Game.Battle.Actions
                 {
                     // 调用 UnitInventory 的新重载方法
                     inventory.ConsumeItem(item, 1);
-                    Debug.Log($"[AbilityAction] Consumed 1x {item.name}");
+                    Debug.Log($"[AbilityAction] Consumed 1x {item.name} from {caster.name}");
                 }
             }
         }

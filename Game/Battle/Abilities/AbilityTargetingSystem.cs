@@ -7,7 +7,7 @@ using Game.Units;
 using Game.Battle.Abilities;
 using Game.Battle.Actions;
 using Game.UI;
-using Game.Inventory; // ⭐ 新增引用
+using Game.Inventory;
 using UnityEngine.InputSystem;
 
 namespace Game.Battle
@@ -34,7 +34,6 @@ namespace Game.Battle
 
         private Ability _currentAbility;
         private BattleUnit _caster;
-        // ⭐ 新增：记录当前正在使用的物品
         private InventoryItem _currentSourceItem;
 
         private HashSet<HexCoords> _validTiles = new HashSet<HexCoords>();
@@ -74,23 +73,33 @@ namespace Game.Battle
             }
         }
 
-        // 技能栏点击（没有来源物品）
+        // 技能栏点击（使用当前选中单位）
         void HandleSkillBarSelection(Ability ability)
         {
-            EnterTargetingMode(ability, null);
+            EnterTargetingMode(ability, null, null);
         }
 
-        // ⭐ 核心修改：支持传入 sourceItem
-        public void EnterTargetingMode(Ability ability, InventoryItem sourceItem = null)
+        // ⭐ 核心修改：支持传入 explicitCaster (用于物品使用，即使单位未被选中)
+        public void EnterTargetingMode(Ability ability, InventoryItem sourceItem = null, BattleUnit explicitCaster = null)
         {
-            var unit = selectionManager.SelectedUnit;
-            if (unit == null) return;
+            // 1. 确定施法者：优先使用显式传入的，否则尝试获取当前选中的
+            BattleUnit targetCaster = explicitCaster;
+            if (targetCaster == null)
+            {
+                var selUnit = selectionManager.SelectedUnit;
+                if (selUnit != null) targetCaster = selUnit.GetComponent<BattleUnit>();
+            }
 
-            _caster = unit.GetComponent<BattleUnit>();
-            _currentSourceItem = sourceItem; // 记录来源
+            if (targetCaster == null)
+            {
+                Debug.LogWarning("[AbilityTargetingSystem] Cannot enter targeting: No caster found (No selection & no explicit caster).");
+                return;
+            }
 
-            // 如果配置了 Trigger Immediately，则跳过瞄准直接执行
-            // 注意：对于药水，建议把这个勾选去掉，以便让玩家有机会“确认”
+            _caster = targetCaster;
+            _currentSourceItem = sourceItem;
+
+            // 2. 检查即时触发
             if (ability.triggerImmediately)
             {
                 ExecuteImmediate(ability, _caster, sourceItem);
@@ -100,13 +109,13 @@ namespace Game.Battle
             _currentAbility = ability;
             _validTiles.Clear();
 
-            Debug.Log($"[Targeting] Enter: {_currentAbility.name} (Source: {sourceItem?.name ?? "SkillBar"})");
+            Debug.Log($"[Targeting] Enter: {_currentAbility.name} (Caster: {_caster.name}, Source: {sourceItem?.name ?? "Skill"})");
 
-            // 计算有效范围
-            var rangeTiles = TargetingResolver.TilesInRange(grid, unit.Coords, ability.minRange, ability.maxRange);
+            // 3. 计算范围
+            var rangeTiles = TargetingResolver.TilesInRange(grid, _caster.UnitRef.Coords, ability.minRange, ability.maxRange);
             foreach (var t in rangeTiles) _validTiles.Add(t);
 
-            // 视觉反馈
+            // 4. 视觉反馈
             highlighter.ClearAll();
             if (outlineManager)
             {
@@ -118,7 +127,6 @@ namespace Game.Battle
             Cursor.SetCursor(cursorInvalid, cursorHotspot, CursorMode.Auto);
         }
 
-        // ⭐ 同样传递 sourceItem
         private void ExecuteImmediate(Ability ability, BattleUnit caster, InventoryItem sourceItem)
         {
             if (!ability.CanUse(caster))
@@ -131,7 +139,7 @@ namespace Game.Battle
             {
                 Caster = caster,
                 Origin = caster.UnitRef.Coords,
-                SourceItem = sourceItem // 注入
+                SourceItem = sourceItem
             };
 
             if (ability.targetType == AbilityTargetType.Self)
@@ -148,13 +156,12 @@ namespace Game.Battle
             var action = new AbilityAction(ability, ctx, abilityRunner);
             actionQueue.Enqueue(action);
             StartCoroutine(actionQueue.RunAll());
-
-            // 这里不需要 ClearSelection，因为还没进入瞄准状态
         }
 
         private bool CheckContentValidity(HexCoords coords)
         {
-            if (_currentAbility == null) return false;
+            if (_currentAbility == null || _caster == null) return false;
+
             selectionManager.TryGetUnitAt(coords, out Unit targetUnit);
             var casterUnit = _caster.GetComponent<Unit>();
 
@@ -229,7 +236,7 @@ namespace Game.Battle
             {
                 Caster = _caster,
                 Origin = casterUnit.Coords,
-                SourceItem = _currentSourceItem // ⭐ 注入 SourceItem
+                SourceItem = _currentSourceItem
             };
             if (targetBattleUnit != null) ctx.TargetUnits.Add(targetBattleUnit);
             ctx.TargetTiles.Add(coords);
@@ -249,7 +256,7 @@ namespace Game.Battle
         {
             _currentAbility = null;
             _caster = null;
-            _currentSourceItem = null; // ⭐ 清空来源
+            _currentSourceItem = null;
             _validTiles.Clear();
 
             if (gridCursor) gridCursor.Hide();
@@ -260,6 +267,7 @@ namespace Game.Battle
                 outlineManager.ClearAbilityRange();
                 outlineManager.ClearPlayerIntent();
 
+                // 恢复 Outline 状态到 Movement (如果有选中单位)
                 if (selectionManager != null && selectionManager.SelectedUnit != null)
                     outlineManager.SetState(OutlineState.Movement);
                 else
@@ -274,7 +282,6 @@ namespace Game.Battle
         {
             if (IsTargeting)
             {
-                // 右键取消
                 if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                     CancelTargeting();
             }

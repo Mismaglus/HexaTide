@@ -1,3 +1,4 @@
+// Scripts/UI/Game/Helper/SkillTooltipController.cs
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,12 +10,13 @@ using Game.Battle.Combat;
 using Game.Units;
 using Game.Common;
 using Game.Localization;
+using Game.Inventory; // Added for InventoryItem
 
 namespace Game.UI
 {
     public class SkillTooltipController : MonoBehaviour
     {
-        // 防止第一次 SetActive(true) 触发 Awake 时立刻 Hide 掉
+        // Prevent hiding on first awake if set active immediately
         private bool _skipHideOnAwake = false;
 
         [Header("Root References")]
@@ -81,21 +83,20 @@ namespace Game.UI
             if (!_skipHideOnAwake) Hide();
         }
 
+        // =========================================================
+        // ENTRY POINT 1: For Abilities (Existing)
+        // =========================================================
         public void Show(Ability ability, BattleUnit caster, bool isEnemy, RectTransform slotRect)
         {
             if (ability == null) return;
 
-            // 1. 先激活物体
-            _skipHideOnAwake = true; // 避免第一次被 Awake 隐藏
-            gameObject.SetActive(true);
-            _skipHideOnAwake = false;
+            ActivateAndPosition(slotRect);
 
-            // 2. 设置位置
-            UpdatePosition(slotRect);
-
-            // 3. 设置所有内容
+            // Visuals
             UpdateVisuals(ability, isEnemy);
             labelName.text = ability.LocalizedName;
+
+            // Content
             UpdateCost(ability);
             UpdateInfo(ability);
             UpdateBasicEffect(ability, caster);
@@ -103,18 +104,60 @@ namespace Game.UI
             labelFlavor.text = $"<i>\"{ability.LocalizedFlavor}\"</i>";
             UpdateAvailability(ability, caster);
 
-            // 4. ⭐⭐⭐ 关键组合拳：强制刷新布局 ⭐⭐⭐
-            if (mainRect != null)
+            ForceLayoutRebuild();
+        }
+
+        // =========================================================
+        // ENTRY POINT 2: For Inventory Items (New)
+        // =========================================================
+        public void Show(InventoryItem item, BattleUnit holder, RectTransform slotRect)
+        {
+            if (item == null) return;
+
+            ActivateAndPosition(slotRect);
+
+            // 1. Determine if it wraps an ability (for cost/type display)
+            Ability wrappedAbility = null;
+            if (item is ConsumableItem consumable)
             {
-                // 第一拳：强制 Canvas 更新所有子元素的几何形状 (让 TMP 立即算出文字大小)
-                Canvas.ForceUpdateCanvases();
-
-                // 第二拳：强制 Layout Group 根据子元素大小重新排版
-                LayoutRebuilder.ForceRebuildLayoutImmediate(mainRect);
-
-                // (可选) 第三拳：如果有多层嵌套 Layout，有时需要再来一次以防万一
-                // LayoutRebuilder.ForceRebuildLayoutImmediate(mainRect); 
+                wrappedAbility = consumable.abilityToCast;
             }
+
+            // 2. Visuals (Treat Items generally as "Mixed" or generic unless they are explicit enemies)
+            // For items, we use the item icon, but we can reuse the "Mixed" style for the frame
+            iconImage.sprite = item.icon;
+            ApplyThemeColor(AbilityType.Mixed, false); // Items default to Mixed/Neutral theme
+
+            // 3. Name
+            labelName.text = item.LocalizedName;
+
+            // 4. Cost (Only if it's a consumable with an ability)
+            if (wrappedAbility != null)
+            {
+                UpdateCost(wrappedAbility);
+                UpdateInfo(wrappedAbility);
+                UpdateBasicEffect(wrappedAbility, holder);
+            }
+            else
+            {
+                // Relics or Materials
+                labelCost.gameObject.SetActive(false);
+                labelInfo.text = GetItemTypeIcon(item.type); // Optional: show a generic bag icon
+                basicRoot.SetActive(false);
+            }
+
+            // 5. Description
+            // If the item has a specific description override, it uses that.
+            // ConsumableItem.GetDynamicDescription falls back to ability description if generic.
+            labelDescription.text = item.GetDynamicDescription(holder);
+
+            // 6. Flavor (Items usually don't have separate flavor fields in this system yet, reuse desc or hide)
+            labelFlavor.text = "";
+
+            // 7. Availability / Item Type Label
+            labelAvailability.text = GetItemTypeLabel(item.type);
+
+            ForceLayoutRebuild();
         }
 
         public void Hide()
@@ -122,22 +165,30 @@ namespace Game.UI
             gameObject.SetActive(false);
         }
 
-        // --- Internal Logic ---
+        // --- Internal Helpers ---
 
-        void UpdatePosition(RectTransform slotRect)
+        void ActivateAndPosition(RectTransform slotRect)
         {
-            if (slotRect == null) return;
-            transform.position = slotRect.position + hoverOffset;
+            _skipHideOnAwake = true;
+            gameObject.SetActive(true);
+            _skipHideOnAwake = false;
+
+            if (slotRect != null)
+                transform.position = slotRect.position + hoverOffset;
         }
 
-        void UpdateVisuals(Ability ability, bool isEnemy)
+        void ForceLayoutRebuild()
         {
-            iconImage.sprite = ability.icon;
+            if (mainRect != null)
+            {
+                Canvas.ForceUpdateCanvases();
+                LayoutRebuilder.ForceRebuildLayoutImmediate(mainRect);
+            }
+        }
 
-            string typeName = GetAbilityTypeName(ability).ToLower();
-            bool isPhy = typeName.Contains("phys");
-            bool isMag = typeName.Contains("magic") || typeName.Contains("magical");
-
+        // Logic split from UpdateVisuals to be reusable
+        void ApplyThemeColor(AbilityType type, bool isEnemy)
+        {
             if (isEnemy)
             {
                 iconImage.color = enemyTint;
@@ -151,37 +202,37 @@ namespace Game.UI
             }
             else
             {
-                if (isPhy)
+                if (type == AbilityType.Physical)
                 {
                     iconImage.color = phyTint;
                     iconGlow.color = GetColorWithAlpha(phyGlow, alphaPhysical);
-
                     if (iconTracery) iconTracery.sprite = traceryPhysical;
                     if (backgroundTracery) backgroundTracery.sprite = traceryPhysical;
-
                     ToggleGems(true, false, false, false);
                 }
-                else if (isMag)
+                else if (type == AbilityType.Magical)
                 {
                     iconImage.color = magTint;
                     iconGlow.color = GetColorWithAlpha(magGlow, alphaMagic);
-
                     if (iconTracery) iconTracery.sprite = traceryMagic;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMagic;
-
                     ToggleGems(false, true, false, false);
                 }
-                else
+                else // Mixed / Item
                 {
                     iconImage.color = mixTint;
                     iconGlow.color = GetColorWithAlpha(mixGlow, alphaMixed);
-
                     if (iconTracery) iconTracery.sprite = traceryMixed;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMixed;
-
                     ToggleGems(false, false, true, false);
                 }
             }
+        }
+
+        void UpdateVisuals(Ability ability, bool isEnemy)
+        {
+            iconImage.sprite = ability.icon;
+            ApplyThemeColor(ability.abilityType, isEnemy);
         }
 
         Color GetColorWithAlpha(Color color, float alpha)
@@ -300,12 +351,21 @@ namespace Game.UI
             }
         }
 
-        string GetAbilityTypeName(Ability ability)
+        string GetItemTypeLabel(ItemType type)
         {
-            if (ability == null) return "Mixed";
-            if (ability.abilityType == AbilityType.Physical) return "Physical";
-            if (ability.abilityType == AbilityType.Magical) return "Magical";
-            return "Mixed";
+            switch (type)
+            {
+                case ItemType.Consumable: return LocalizationManager.Get("TYPE_CONSUMABLE") != "TYPE_CONSUMABLE" ? LocalizationManager.Get("TYPE_CONSUMABLE") : "Consumable";
+                case ItemType.Relic: return LocalizationManager.Get("TYPE_RELIC") != "TYPE_RELIC" ? LocalizationManager.Get("TYPE_RELIC") : "Relic";
+                case ItemType.Material: return "Material";
+                default: return "Item";
+            }
+        }
+
+        string GetItemTypeIcon(ItemType type)
+        {
+            // Just a placeholder icon return, usually empty string if no specific icon needed in info slot
+            return "";
         }
     }
 }

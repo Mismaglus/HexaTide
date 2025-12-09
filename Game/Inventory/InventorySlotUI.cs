@@ -4,10 +4,10 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.EventSystems;
 using Game.Inventory;
+using Game.Battle; // for BattleUnit
 
 namespace Game.UI.Inventory
 {
-    // ⭐ 修改 1: 移除了 [RequireComponent(typeof(Animator))]
     public class InventorySlotUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
         [Header("Components")]
@@ -16,10 +16,9 @@ namespace Game.UI.Inventory
         public Button button;
 
         [Header("Animator Settings")]
-        [Tooltip("请将子物体 HighlightAndSelect 上的 Animator 拖到这里")]
-        public Animator targetAnimator; // ⭐ 修改 2: 变为公开变量，允许手动指定
-
-        [Tooltip("Animator 中用于控制强制高亮的 Bool 参数名")]
+        [Tooltip("Please drag the Animator from child 'HighlightAndSelect'")]
+        public Animator targetAnimator;
+        [Tooltip("Animator bool param for highlighting")]
         public string activeBoolParam = "IsActive";
 
         private InventoryItem _item;
@@ -28,29 +27,31 @@ namespace Game.UI.Inventory
         private System.Action<int> _onClickCallback;
         private RectTransform _rect;
 
+        // Tooltip Refs
+        private SkillTooltipController _tooltipController;
+        private BattleUnit _owner; // Who holds this item?
+
         void Awake()
         {
             _rect = GetComponent<RectTransform>();
 
-            // ⭐ 修改 3: 如果 Inspector 里没拖，尝试自动在子物体里找一个兜底
             if (targetAnimator == null)
-            {
                 targetAnimator = GetComponentInChildren<Animator>();
-            }
 
             if (button)
-            {
                 button.onClick.AddListener(OnClicked);
-            }
         }
 
-        public void Setup(InventoryItem item, int count, int index, System.Action<int> onClick)
+        // ⭐ Updated Setup: Receives tooltip controller and owner
+        public void Setup(InventoryItem item, int count, int index, System.Action<int> onClick, SkillTooltipController tooltipCtrl, BattleUnit owner)
         {
             _item = item;
             _index = index;
             _onClickCallback = onClick;
+            _tooltipController = tooltipCtrl;
+            _owner = owner;
 
-            // 重置高亮状态
+            // Reset highlight
             SetHighlightState(false);
 
             if (_item != null)
@@ -92,23 +93,30 @@ namespace Game.UI.Inventory
 
         public void SetHighlightState(bool isActive)
         {
-            // ⭐ 修改 4: 安全检查
             if (targetAnimator != null)
             {
                 targetAnimator.SetBool(activeBoolParam, isActive);
             }
         }
 
-        // === Tooltip ===
+        // === Tooltip Logic ===
         public void OnPointerEnter(PointerEventData eventData)
         {
             if (_item == null) return;
-            // TooltipController.Instance.Show(_item, ...);
+
+            if (_tooltipController != null)
+            {
+                // Show item tooltip using the generic overload we added
+                _tooltipController.Show(_item, _owner, _rect);
+            }
         }
 
         public void OnPointerExit(PointerEventData eventData)
         {
-            // TooltipController.Instance.Hide();
+            if (_tooltipController != null)
+            {
+                _tooltipController.Hide();
+            }
         }
     }
 }

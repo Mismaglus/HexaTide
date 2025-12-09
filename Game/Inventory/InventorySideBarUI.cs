@@ -5,55 +5,56 @@ using Game.Inventory;
 using Game.Battle;
 using Game.Units;
 using System.Linq;
+using Game.UI; // For SkillTooltipController
 
 namespace Game.UI.Inventory
 {
     public class InventorySideBarUI : MonoBehaviour
     {
         [Header("Configuration")]
-        [Tooltip("这个面板显示哪种类型的物品？(左栏选 Consumable, 右栏选 Relic)")]
+        [Tooltip("Type of items to show (Consumable/Relic)")]
         public ItemType targetType;
 
         [Header("Scene References")]
-        public Transform contentRoot;      // ScrollView 的 Content 节点
-        public InventorySlotUI slotPrefab; // Slot Prefab
+        public Transform contentRoot;
+        public InventorySlotUI slotPrefab;
 
         [Header("System Refs (Auto-Found)")]
         public AbilityTargetingSystem targetingSystem;
+        public SkillTooltipController tooltipController; // ⭐ New
 
-        // 缓存
+        // Cache
         private UnitInventory _currentInventory;
         private List<InventorySlotUI> _activeSlots = new List<InventorySlotUI>();
 
-        // 状态标记
+        // State
         private bool _isPlayerBound = false;
         private int _currentSelectedIndex = -1;
 
         void Start()
         {
-            ResolveTargetingSystem();
+            ResolveRefs();
             FindAndBindPlayerInventory();
         }
 
         void Update()
         {
-            // 兜底逻辑：如果开局没找到玩家（异步生成）
             if (!_isPlayerBound) FindAndBindPlayerInventory();
+            if (targetingSystem == null) ResolveRefs();
 
-            // 兜底逻辑：如果 System 没找到（场景加载延迟）
-            if (targetingSystem == null) ResolveTargetingSystem();
-
-            // 高亮取消逻辑：如果系统存在且不再瞄准，清除 UI 高亮
             if (targetingSystem != null && !targetingSystem.IsTargeting && _currentSelectedIndex != -1)
             {
                 ClearSelection();
             }
         }
 
-        void ResolveTargetingSystem()
+        void ResolveRefs()
         {
-            if (targetingSystem != null) return;
-            targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
+            if (targetingSystem == null)
+                targetingSystem = FindFirstObjectByType<AbilityTargetingSystem>(FindObjectsInactive.Include);
+
+            if (tooltipController == null)
+                tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
         }
 
         void OnDestroy()
@@ -89,6 +90,9 @@ namespace Game.UI.Inventory
 
             if (_currentInventory == null) return;
 
+            // Get owner for tooltip calculations (stats scaling etc.)
+            BattleUnit owner = _currentInventory.GetComponent<BattleUnit>();
+
             var slotsData = _currentInventory.Slots;
             for (int i = 0; i < slotsData.Count; i++)
             {
@@ -101,7 +105,8 @@ namespace Game.UI.Inventory
 
                 if (ui != null)
                 {
-                    ui.Setup(data.item, data.count, i, OnSlotClicked);
+                    // ⭐ Updated Setup call with Tooltip Controller and Owner
+                    ui.Setup(data.item, data.count, i, OnSlotClicked, tooltipController, owner);
                     _activeSlots.Add(ui);
                 }
             }
@@ -109,7 +114,7 @@ namespace Game.UI.Inventory
 
         void OnSlotClicked(int inventoryIndex)
         {
-            if (targetingSystem == null) ResolveTargetingSystem();
+            if (targetingSystem == null) ResolveRefs();
 
             if (_currentInventory == null) return;
             if (inventoryIndex < 0 || inventoryIndex >= _currentInventory.Slots.Count) return;
@@ -125,10 +130,7 @@ namespace Game.UI.Inventory
                 {
                     if (targetingSystem != null)
                     {
-                        // ⭐ 核心修复：获取背包的持有者 (Player Unit)
                         var owner = _currentInventory.GetComponent<BattleUnit>();
-
-                        // ⭐ 传入 explicitCaster = owner，不再依赖 SelectionManager.SelectedUnit
                         targetingSystem.EnterTargetingMode(consumable.abilityToCast, consumable, owner);
 
                         UpdateHighlightVisuals(inventoryIndex);

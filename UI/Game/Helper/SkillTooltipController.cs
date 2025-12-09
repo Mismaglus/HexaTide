@@ -10,7 +10,7 @@ using Game.Battle.Combat;
 using Game.Units;
 using Game.Common;
 using Game.Localization;
-using Game.Inventory; // Added for InventoryItem
+using Game.Inventory;
 
 namespace Game.UI
 {
@@ -51,13 +51,24 @@ namespace Game.UI
         public TextMeshProUGUI labelAvailability;
 
         [Header("Visual Settings")]
+        [Tooltip("Standard offset for Skills (Upwards)")]
         public Vector3 hoverOffset = new Vector3(0, 80f, 0);
+
+        [Header("Inventory Offsets")]
+        [Tooltip("Offset for Consumables (To the Right)")]
+        public Vector3 offsetConsumable = new Vector3(250f, -50f, 0f);
+
+        [Tooltip("Offset for Relics (To the Left)")]
+        public Vector3 offsetRelic = new Vector3(-250f, -50f, 0f);
 
         [Header("Tracery Assets")]
         public Sprite traceryPhysical;
         public Sprite traceryMagic;
         public Sprite traceryMixed;
         public Sprite traceryEnemy;
+        [Space]
+        public Sprite traceryConsumable; // ⭐ New
+        public Sprite traceryRelic;      // ⭐ New
 
         [Header("Colors (RGB Only)")]
         public Color enemyTint = new Color(1f, 0.85f, 0.85f, 1f);
@@ -84,16 +95,16 @@ namespace Game.UI
         }
 
         // =========================================================
-        // ENTRY POINT 1: For Abilities (Existing)
+        // ENTRY POINT 1: For Abilities (Skill Bar)
         // =========================================================
         public void Show(Ability ability, BattleUnit caster, bool isEnemy, RectTransform slotRect)
         {
             if (ability == null) return;
 
-            ActivateAndPosition(slotRect);
+            ActivateAndPosition(slotRect, hoverOffset);
 
-            // Visuals
-            UpdateVisuals(ability, isEnemy);
+            // Visuals: Skills ALWAYS show their Gem type
+            UpdateVisuals(ability, isEnemy, showGem: true);
             labelName.text = ability.LocalizedName;
 
             // Content
@@ -108,30 +119,46 @@ namespace Game.UI
         }
 
         // =========================================================
-        // ENTRY POINT 2: For Inventory Items (New)
+        // ENTRY POINT 2: For Inventory Items (Side Bar)
         // =========================================================
         public void Show(InventoryItem item, BattleUnit holder, RectTransform slotRect)
         {
             if (item == null) return;
 
-            ActivateAndPosition(slotRect);
+            // Determine Offset based on Type
+            Vector3 targetOffset = hoverOffset;
+            if (item.type == ItemType.Consumable) targetOffset = offsetConsumable;
+            else if (item.type == ItemType.Relic) targetOffset = offsetRelic;
 
-            // 1. Determine if it wraps an ability (for cost/type display)
+            ActivateAndPosition(slotRect, targetOffset);
+
+            // 1. Determine if it wraps an ability
             Ability wrappedAbility = null;
             if (item is ConsumableItem consumable)
             {
                 wrappedAbility = consumable.abilityToCast;
             }
 
-            // 2. Visuals (Treat Items generally as "Mixed" or generic unless they are explicit enemies)
-            // For items, we use the item icon, but we can reuse the "Mixed" style for the frame
+            // 2. Visuals: Start with Mixed/Neutral theme (no gem)
             iconImage.sprite = item.icon;
-            ApplyThemeColor(AbilityType.Mixed, false); // Items default to Mixed/Neutral theme
+            ApplyThemeColor(AbilityType.Mixed, false, showGem: false);
+
+            // ⭐ OVERRIDE Tracery if specific sprite is provided for this Item Type
+            if (item.type == ItemType.Consumable && traceryConsumable != null)
+            {
+                if (iconTracery) iconTracery.sprite = traceryConsumable;
+                if (backgroundTracery) backgroundTracery.sprite = traceryConsumable;
+            }
+            else if (item.type == ItemType.Relic && traceryRelic != null)
+            {
+                if (iconTracery) iconTracery.sprite = traceryRelic;
+                if (backgroundTracery) backgroundTracery.sprite = traceryRelic;
+            }
 
             // 3. Name
             labelName.text = item.LocalizedName;
 
-            // 4. Cost (Only if it's a consumable with an ability)
+            // 4. Cost / Info
             if (wrappedAbility != null)
             {
                 UpdateCost(wrappedAbility);
@@ -142,19 +169,17 @@ namespace Game.UI
             {
                 // Relics or Materials
                 labelCost.gameObject.SetActive(false);
-                labelInfo.text = GetItemTypeIcon(item.type); // Optional: show a generic bag icon
+                labelInfo.text = GetItemTypeIcon(item.type);
                 basicRoot.SetActive(false);
             }
 
             // 5. Description
-            // If the item has a specific description override, it uses that.
-            // ConsumableItem.GetDynamicDescription falls back to ability description if generic.
             labelDescription.text = item.GetDynamicDescription(holder);
 
-            // 6. Flavor (Items usually don't have separate flavor fields in this system yet, reuse desc or hide)
+            // 6. Flavor
             labelFlavor.text = "";
 
-            // 7. Availability / Item Type Label
+            // 7. Availability / Type Label
             labelAvailability.text = GetItemTypeLabel(item.type);
 
             ForceLayoutRebuild();
@@ -167,14 +192,14 @@ namespace Game.UI
 
         // --- Internal Helpers ---
 
-        void ActivateAndPosition(RectTransform slotRect)
+        void ActivateAndPosition(RectTransform slotRect, Vector3 offset)
         {
             _skipHideOnAwake = true;
             gameObject.SetActive(true);
             _skipHideOnAwake = false;
 
             if (slotRect != null)
-                transform.position = slotRect.position + hoverOffset;
+                transform.position = slotRect.position + offset;
         }
 
         void ForceLayoutRebuild()
@@ -186,8 +211,7 @@ namespace Game.UI
             }
         }
 
-        // Logic split from UpdateVisuals to be reusable
-        void ApplyThemeColor(AbilityType type, bool isEnemy)
+        void ApplyThemeColor(AbilityType type, bool isEnemy, bool showGem)
         {
             if (isEnemy)
             {
@@ -198,7 +222,7 @@ namespace Game.UI
                 if (iconTracery) iconTracery.sprite = t;
                 if (backgroundTracery) backgroundTracery.sprite = t;
 
-                ToggleGems(false, false, false, true);
+                ToggleGems(false, false, false, showGem);
             }
             else
             {
@@ -208,7 +232,8 @@ namespace Game.UI
                     iconGlow.color = GetColorWithAlpha(phyGlow, alphaPhysical);
                     if (iconTracery) iconTracery.sprite = traceryPhysical;
                     if (backgroundTracery) backgroundTracery.sprite = traceryPhysical;
-                    ToggleGems(true, false, false, false);
+
+                    ToggleGems(showGem, false, false, false);
                 }
                 else if (type == AbilityType.Magical)
                 {
@@ -216,7 +241,8 @@ namespace Game.UI
                     iconGlow.color = GetColorWithAlpha(magGlow, alphaMagic);
                     if (iconTracery) iconTracery.sprite = traceryMagic;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMagic;
-                    ToggleGems(false, true, false, false);
+
+                    ToggleGems(false, showGem, false, false);
                 }
                 else // Mixed / Item
                 {
@@ -224,15 +250,16 @@ namespace Game.UI
                     iconGlow.color = GetColorWithAlpha(mixGlow, alphaMixed);
                     if (iconTracery) iconTracery.sprite = traceryMixed;
                     if (backgroundTracery) backgroundTracery.sprite = traceryMixed;
-                    ToggleGems(false, false, true, false);
+
+                    ToggleGems(false, false, showGem, false);
                 }
             }
         }
 
-        void UpdateVisuals(Ability ability, bool isEnemy)
+        void UpdateVisuals(Ability ability, bool isEnemy, bool showGem)
         {
             iconImage.sprite = ability.icon;
-            ApplyThemeColor(ability.abilityType, isEnemy);
+            ApplyThemeColor(ability.abilityType, isEnemy, showGem);
         }
 
         Color GetColorWithAlpha(Color color, float alpha)
@@ -364,7 +391,6 @@ namespace Game.UI
 
         string GetItemTypeIcon(ItemType type)
         {
-            // Just a placeholder icon return, usually empty string if no specific icon needed in info slot
             return "";
         }
     }

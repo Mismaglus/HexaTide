@@ -19,6 +19,10 @@ namespace Game.Inventory
             public void Clear() { item = null; count = 0; }
         }
 
+        [Header("Persistence (Player Only)")]
+        [Tooltip("Assign the global PlayerBackpackSO here if this unit is the Player.")]
+        [SerializeField] private PlayerBackpackSO persistentStorage;
+
         [Header("Runtime Storage")]
         [SerializeField] private List<Slot> slots = new List<Slot>();
 
@@ -37,9 +41,38 @@ namespace Game.Inventory
             _attrs = GetComponent<UnitAttributes>();
         }
 
+        void Start()
+        {
+            // If we have persistent storage (Player), load from it instead of starting empty
+            if (persistentStorage != null)
+            {
+                LoadFromPersistence();
+            }
+        }
+
+        private void LoadFromPersistence()
+        {
+            if (persistentStorage == null) return;
+
+            // Overwrite local slots with data from the SO
+            slots = persistentStorage.GetCopy();
+
+            // Trigger UI refresh
+            NotifyChange();
+            Debug.Log($"[UnitInventory] Loaded {slots.Count} items from Persistent Backpack.");
+        }
+
+        private void SaveToPersistence()
+        {
+            if (persistentStorage == null) return;
+            persistentStorage.LoadFrom(slots);
+        }
+
         public bool TryAddItem(InventoryItem item, int amount = 1)
         {
             if (item == null || amount <= 0) return false;
+
+            bool changed = false;
 
             // 1. 尝试堆叠 (Stacking)
             if (item.isStackable)
@@ -53,12 +86,9 @@ namespace Game.Inventory
 
                         slot.count += toAdd;
                         amount -= toAdd;
+                        changed = true;
 
-                        if (amount <= 0)
-                        {
-                            NotifyChange();
-                            return true;
-                        }
+                        if (amount <= 0) break;
                     }
                 }
             }
@@ -69,9 +99,8 @@ namespace Game.Inventory
                 if (slots.Count >= Capacity)
                 {
                     Debug.LogWarning($"[Inventory] {name} is full! Cannot add {item.name}");
-                    // 即使只加了一部分也刷新，或者你可以选择回滚
-                    NotifyChange();
-                    return false;
+                    if (changed) NotifyChange();
+                    return changed; // Return true if we managed to add at least some
                 }
 
                 int toAdd = Mathf.Min(amount, item.maxStack);
@@ -82,9 +111,10 @@ namespace Game.Inventory
                 item.OnAcquire(_battleUnit);
 
                 amount -= toAdd;
+                changed = true;
             }
 
-            NotifyChange();
+            if (changed) NotifyChange();
             return true;
         }
 
@@ -126,7 +156,6 @@ namespace Game.Inventory
         }
 
         // ⭐ 对象版本 (AbilityAction 调用这个)
-        // 之前被截断的部分就在这里
         public void ConsumeItem(InventoryItem item, int amount = 1)
         {
             // 简单逻辑：找到第一个匹配的格子并扣除
@@ -143,6 +172,8 @@ namespace Game.Inventory
 
         private void NotifyChange()
         {
+            // Whenever inventory changes, sync to persistent storage immediately
+            SaveToPersistence();
             OnInventoryChanged?.Invoke();
         }
 

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Game.Inventory;
 
 namespace Game.Battle
 {
@@ -12,9 +13,6 @@ namespace Game.Battle
         Enemy
     }
 
-    /// <summary>
-    /// Coordinates high level battle turn flow and exposes turn state to UI.
-    /// </summary>
     public class BattleStateMachine : MonoBehaviour
     {
         public static BattleStateMachine Instance { get; private set; }
@@ -27,16 +25,21 @@ namespace Game.Battle
         [SerializeField] private bool autoStart = true;
         [SerializeField] private TurnSide startingSide = TurnSide.Player;
 
+        [Header("Rewards (Fallback)")]
+        [Tooltip("Default loot table used if BattleContext.ActiveLootTable is null.")]
+        [SerializeField] private LootTableSO defaultLootTable;
+
         public TurnSide CurrentTurn { get; private set; } = TurnSide.Player;
         public event System.Action<TurnSide> OnTurnChanged;
 
-        // 胜负事件
         public event System.Action OnVictory;
         public event System.Action OnDefeat;
 
+        // ⭐ Changed to BattleRewardResult
+        public BattleRewardResult Rewards { get; private set; }
+
         readonly List<BattleUnit> _playerUnits = new();
         readonly List<BattleUnit> _enemyUnits = new();
-
         readonly List<ITurnActor> _playerActors = new();
         readonly List<ITurnActor> _enemyActors = new();
 
@@ -46,11 +49,8 @@ namespace Game.Battle
         void Awake()
         {
             Instance = this;
-
-            if (rules == null)
-                rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
-            if (turnController == null)
-                turnController = GetComponentInParent<BattleTurnController>() ?? FindFirstObjectByType<BattleTurnController>(FindObjectsInactive.Exclude);
+            if (rules == null) rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
+            if (turnController == null) turnController = GetComponentInParent<BattleTurnController>() ?? FindFirstObjectByType<BattleTurnController>(FindObjectsInactive.Exclude);
 
             CurrentTurn = startingSide;
             RebuildRosters();
@@ -58,23 +58,17 @@ namespace Game.Battle
 
         void Start()
         {
-            if (autoStart)
-                BeginTurn(startingSide, notifyActors: true);
+            if (autoStart) BeginTurn(startingSide, notifyActors: true);
         }
 
         void OnDisable()
         {
-            if (_enemyTurnRoutine != null)
-            {
-                StopCoroutine(_enemyTurnRoutine);
-                _enemyTurnRoutine = null;
-            }
+            if (_enemyTurnRoutine != null) StopCoroutine(_enemyTurnRoutine);
         }
 
         public void RebuildRosters()
         {
             if (_isBattleEnded) return;
-
             _playerUnits.Clear();
             _enemyUnits.Clear();
 
@@ -84,8 +78,6 @@ namespace Game.Battle
                 if (unit.isPlayer) _playerUnits.Add(unit);
                 else _enemyUnits.Add(unit);
             }
-
-            // Sort by InstanceID ensures deterministic order if positions are same (optional)
             _playerUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
             _enemyUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
 
@@ -131,25 +123,18 @@ namespace Game.Battle
             CheckBattleOutcome();
         }
 
-        // ⭐⭐⭐ 核心逻辑修改：胜负判定 ⭐⭐⭐
         void CheckBattleOutcome()
         {
-            // 1. 失败判定：
-            // 检查玩家队伍中是否还有“非召唤物”角色存活
-            // 如果所有剩下的全是召唤物，或者列表为空，则失败
             bool hasRealPlayerCharacter = _playerUnits.Any(u => u != null && !u.isSummon);
-
             if (!hasRealPlayerCharacter)
             {
-                EndBattle(false); // Defeat
+                EndBattle(false);
                 return;
             }
 
-            // 2. 胜利判定：
-            // 所有敌人阵亡
             if (_enemyUnits.Count == 0)
             {
-                EndBattle(true); // Victory
+                EndBattle(true);
                 return;
             }
         }
@@ -162,12 +147,30 @@ namespace Game.Battle
             if (playerWon)
             {
                 Debug.Log("🏆 VICTORY!");
+                CalculateRewards();
                 OnVictory?.Invoke();
             }
             else
             {
                 Debug.Log("☠️ DEFEAT!");
                 OnDefeat?.Invoke();
+            }
+        }
+
+        private void CalculateRewards()
+        {
+            LootTableSO tableToUse = BattleContext.ActiveLootTable;
+            if (tableToUse == null) tableToUse = defaultLootTable;
+
+            if (tableToUse != null)
+            {
+                Rewards = tableToUse.GenerateRewards();
+                Debug.Log($"[BattleStateMachine] Rewards Generated: {Rewards.gold} Gold, {Rewards.experience} Exp, {Rewards.items.Count} Items.");
+            }
+            else
+            {
+                Rewards = new BattleRewardResult(); // Empty
+                Debug.LogWarning("[BattleStateMachine] No LootTable found. No rewards generated.");
             }
         }
 
@@ -180,38 +183,27 @@ namespace Game.Battle
             BeginTurn(firstSide, notifyActors: true);
         }
 
-        // === 玩家点击结束回合 ===
         public void EndTurnRequest()
         {
             if (_isBattleEnded) return;
             if (CurrentTurn != TurnSide.Player) return;
             if (_enemyTurnRoutine != null) return;
 
-            // 1. 结算玩家回合结束的效果 (Night Cinders 触发点)
             EndCurrentTurn(TurnSide.Player);
-
-            // 2. 启动敌人回合
             _enemyTurnRoutine = StartCoroutine(RunEnemyTurnRoutine());
         }
 
         IEnumerator RunEnemyTurnRoutine()
         {
-            // 3. 开启敌人回合 (Stellar Erosion / Lunar Scar 触发点)
             BeginTurn(TurnSide.Enemy, notifyActors: true);
-
             var actors = new List<ITurnActor>(_enemyActors);
             foreach (var actor in actors)
             {
                 if (actor == null || (actor is MonoBehaviour mb && mb == null)) continue;
                 yield return actor.TakeTurn();
-
                 if (_isBattleEnded) yield break;
             }
-
-            // 4. 结算敌人回合结束的效果
             EndCurrentTurn(TurnSide.Enemy);
-
-            // 5. 回到玩家回合
             BeginTurn(TurnSide.Player, notifyActors: true);
             _enemyTurnRoutine = null;
         }
@@ -219,38 +211,23 @@ namespace Game.Battle
         void BeginTurn(TurnSide side, bool notifyActors)
         {
             if (_isBattleEnded) return;
-
             Cleanup();
             CurrentTurn = side;
-
-            // 重置资源，并触发 OnTurnStart (Dot 伤害)
             var unitsSnapshot = GetUnitsFor(side).ToArray();
-            foreach (var unit in unitsSnapshot)
-            {
-                if (unit) unit.OnTurnStart();
-            }
-
+            foreach (var unit in unitsSnapshot) if (unit) unit.OnTurnStart();
             if (notifyActors)
             {
                 var actorsSnapshot = GetActorsFor(side).ToArray();
-                foreach (var actor in actorsSnapshot)
-                {
-                    actor?.OnTurnStart();
-                }
+                foreach (var actor in actorsSnapshot) actor?.OnTurnStart();
             }
-
             OnTurnChanged?.Invoke(CurrentTurn);
             Debug.Log($"⚡ Turn Start: {side}");
         }
 
-        // 回合结束结算逻辑
         void EndCurrentTurn(TurnSide side)
         {
             var unitsSnapshot = GetUnitsFor(side).ToArray();
-            foreach (var u in unitsSnapshot)
-            {
-                if (u != null) u.OnTurnEnd(); // 触发 Status.OnTurnEnd (如夜烬扣血)
-            }
+            foreach (var u in unitsSnapshot) if (u != null) u.OnTurnEnd();
         }
 
         void Cleanup()

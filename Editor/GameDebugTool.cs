@@ -1,8 +1,10 @@
 // Scripts/Editor/GameDebugTool.cs
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using Game.Inventory;
 using Game.Units;
 using Game.Battle;
@@ -13,14 +15,20 @@ namespace Game.EditorTools
     {
         // --- Main Navigation ---
         private int _mainTab = 0;
-        private readonly string[] _mainTabs = { "Battle Control", "Inventory Injector" };
+        private readonly string[] _mainTabs = { "Scenes", "Battle Control", "Inventory Injector" };
+
+        // --- Scene Data ---
+        private Vector2 _sceneScrollPos;
+        private List<string> _scenePaths = new List<string>();
+        // ⭐ CONFIG: The folder to search for scenes
+        private const string SCENE_SEARCH_FOLDER = "Assets/_Scenes";
 
         // --- Inventory Data ---
         private List<InventoryItem> _allItems = new List<InventoryItem>();
         private Dictionary<string, List<InventoryItem>> _categorizedItems = new Dictionary<string, List<InventoryItem>>();
         private int _invCategoryTab = 0;
         private readonly string[] _invCategoryNames = { "Consumables", "Relics", "Materials", "All" };
-        private Vector2 _scrollPos;
+        private Vector2 _invScrollPos;
         private string _searchQuery = "";
 
         // --- Battle Setup Data ---
@@ -32,11 +40,17 @@ namespace Game.EditorTools
         {
             var window = GetWindow<GameDebugTool>("Game Debugger");
             window.minSize = new Vector2(350, 500);
-            window.RefreshInventoryDatabase();
+            window.RefreshAllDatabases();
         }
 
         private void OnEnable()
         {
+            RefreshAllDatabases();
+        }
+
+        private void RefreshAllDatabases()
+        {
+            RefreshSceneList();
             RefreshInventoryDatabase();
         }
 
@@ -64,13 +78,95 @@ namespace Game.EditorTools
 
             switch (_mainTab)
             {
-                case 0: DrawBattleSection(); break;
-                case 1: DrawInventorySection(); break;
+                case 0: DrawSceneSection(); break;
+                case 1: DrawBattleSection(); break;
+                case 2: DrawInventorySection(); break;
             }
         }
 
         // =========================================================
-        // SECTION 1: BATTLE CONTROL
+        // SECTION 1: SCENE SWITCHER
+        // =========================================================
+        private void RefreshSceneList()
+        {
+            _scenePaths.Clear();
+
+            // ⭐ Validate folder exists to prevent errors
+            if (!AssetDatabase.IsValidFolder(SCENE_SEARCH_FOLDER))
+            {
+                // Fallback: If folder doesn't exist, search everywhere but warn
+                Debug.LogWarning($"[GameDebugger] Folder '{SCENE_SEARCH_FOLDER}' not found. Showing all scenes in Assets/.");
+                string[] allGuids = AssetDatabase.FindAssets("t:Scene");
+                foreach (string guid in allGuids)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    if (path.StartsWith("Assets/")) _scenePaths.Add(path);
+                }
+                return;
+            }
+
+            // ⭐ Search specifically in the requested folder
+            string[] guids = AssetDatabase.FindAssets("t:Scene", new[] { SCENE_SEARCH_FOLDER });
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                _scenePaths.Add(path);
+            }
+        }
+
+        private void DrawSceneSection()
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Scenes in {SCENE_SEARCH_FOLDER}", EditorStyles.boldLabel);
+            if (GUILayout.Button("Refresh List", GUILayout.Width(80))) RefreshSceneList();
+            EditorGUILayout.EndHorizontal();
+
+            if (_scenePaths.Count == 0)
+            {
+                EditorGUILayout.HelpBox($"No scenes found in '{SCENE_SEARCH_FOLDER}'.\nCheck spelling or move scenes there.", MessageType.Info);
+            }
+
+            GUILayout.Space(5);
+
+            _sceneScrollPos = EditorGUILayout.BeginScrollView(_sceneScrollPos);
+
+            foreach (string path in _scenePaths)
+            {
+                string sceneName = Path.GetFileNameWithoutExtension(path);
+
+                // Highlight current scene
+                string currentPath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path;
+                bool isCurrent = currentPath == path;
+
+                GUI.color = isCurrent ? Color.green : Color.white;
+
+                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+                GUILayout.Label(sceneName, EditorStyles.boldLabel, GUILayout.Width(150));
+                GUILayout.Label(Path.GetFileName(Path.GetDirectoryName(path)), EditorStyles.miniLabel); // Subfolder name
+
+                if (GUILayout.Button("Open", GUILayout.Width(60)))
+                {
+                    OpenScene(path);
+                }
+
+                EditorGUILayout.EndHorizontal();
+                GUI.color = Color.white;
+            }
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void OpenScene(string path)
+        {
+            if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+            {
+                EditorSceneManager.OpenScene(path);
+            }
+        }
+
+        // =========================================================
+        // SECTION 2: BATTLE CONTROL
         // =========================================================
         private void DrawBattleSection()
         {
@@ -143,7 +239,7 @@ namespace Game.EditorTools
         }
 
         // =========================================================
-        // SECTION 2: INVENTORY INJECTOR
+        // SECTION 3: INVENTORY INJECTOR
         // =========================================================
         private void DrawInventorySection()
         {
@@ -186,7 +282,7 @@ namespace Game.EditorTools
 
         private void DrawItemList(List<InventoryItem> items, UnitInventory target)
         {
-            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
+            _invScrollPos = EditorGUILayout.BeginScrollView(_invScrollPos);
 
             var filtered = items.Where(x => x.name.IndexOf(_searchQuery, System.StringComparison.OrdinalIgnoreCase) >= 0).ToList();
 
@@ -238,7 +334,6 @@ namespace Game.EditorTools
             _categorizedItems["Materials"] = new List<InventoryItem>();
             _categorizedItems["All"] = new List<InventoryItem>();
 
-            // Find all items in project
             string[] guids = AssetDatabase.FindAssets("t:InventoryItem");
             foreach (string guid in guids)
             {

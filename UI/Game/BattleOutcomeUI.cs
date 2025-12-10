@@ -18,12 +18,19 @@ namespace Game.UI
         public GameObject victoryPanel;
         public GameObject defeatPanel;
 
-        [Header("Loot Configuration")]
+        [Header("Loot List Configuration")]
         public Transform lootContainer;
-        [Tooltip("Use the new LootSlotUI prefab here")]
         public LootSlotUI lootSlotPrefab;
 
-        [Header("Reward Labels")]
+        [Header("Loot Details Panel")]
+        [Tooltip("Text to show description of selected item")]
+        public TextMeshProUGUI descriptionText;
+        [Tooltip("Text to show flavor/lore of selected item")]
+        public TextMeshProUGUI flavorText;
+        [TextArea]
+        public string defaultHint = "Select an item to view details.";
+
+        [Header("Reward Summary Labels")]
         public TextMeshProUGUI labelGold;
         public TextMeshProUGUI labelExp;
 
@@ -32,11 +39,8 @@ namespace Game.UI
         public Button defeatRetryBtn;
         public Button defeatQuitBtn;
 
-        [Header("References")]
-        public SkillTooltipController tooltipController;
-
         private BattleStateMachine _battleSM;
-        private BattleRewardResult _cachedResult; // Stores Items + Gold + Exp
+        private BattleRewardResult _cachedResult;
 
         void Awake()
         {
@@ -46,8 +50,6 @@ namespace Game.UI
             if (victoryContinueBtn) victoryContinueBtn.onClick.AddListener(OnVictoryContinue);
             if (defeatRetryBtn) defeatRetryBtn.onClick.AddListener(OnDefeatRetry);
             if (defeatQuitBtn) defeatQuitBtn.onClick.AddListener(OnDefeatQuit);
-
-            if (!tooltipController) tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
         }
 
         void Start()
@@ -76,6 +78,10 @@ namespace Game.UI
         {
             if (victoryPanel) victoryPanel.SetActive(true);
 
+            // Reset Detail View
+            if (descriptionText) descriptionText.text = defaultHint;
+            if (flavorText) flavorText.text = "";
+
             if (_battleSM != null)
             {
                 _cachedResult = _battleSM.Rewards;
@@ -91,7 +97,7 @@ namespace Game.UI
             if (labelGold) labelGold.text = $"{rewards.gold} G";
             if (labelExp) labelExp.text = $"{rewards.experience} XP";
 
-            // 2. Spawn Loot Slots
+            // 2. Spawn Items
             if (lootContainer == null || lootSlotPrefab == null) return;
 
             foreach (Transform child in lootContainer) Destroy(child.gameObject);
@@ -100,13 +106,41 @@ namespace Game.UI
             {
                 var slotData = rewards.items[i];
                 var go = Instantiate(lootSlotPrefab, lootContainer);
-
-                // Using LootSlotUI
                 var ui = go.GetComponent<LootSlotUI>();
 
                 if (ui != null)
                 {
-                    ui.Setup(slotData.item, slotData.count, tooltipController);
+                    // Pass the UpdateDetails method as the callback
+                    ui.Setup(slotData.item, UpdateDetails);
+                }
+            }
+        }
+
+        // ⭐ Called when a LootSlotUI is clicked
+        void UpdateDetails(InventoryItem item)
+        {
+            if (item == null) return;
+
+            // 1. Description
+            // We pass 'null' as holder because we are viewing loot, not checking player stats scaling
+            if (descriptionText)
+            {
+                descriptionText.text = item.GetDynamicDescription(null);
+            }
+
+            // 2. Flavor
+            if (flavorText)
+            {
+                // Try to get flavor from the wrapped Ability if it's a consumable
+                if (item is ConsumableItem consumable && consumable.abilityToCast != null)
+                {
+                    // Assuming ability has a LocalizedFlavor field
+                    flavorText.text = $"<i>\"{consumable.abilityToCast.LocalizedFlavor}\"</i>";
+                }
+                else
+                {
+                    // For now, other items might not have specific flavor text
+                    flavorText.text = "";
                 }
             }
         }
@@ -119,10 +153,7 @@ namespace Game.UI
         void OnVictoryContinue()
         {
             ClaimRewards();
-
-            // Clean up the context before leaving to avoid it leaking to the next fight
             BattleContext.Reset();
-
             Debug.Log("Transitioning to Map/Next Level...");
             // SceneManager.LoadScene("MapScene"); 
         }
@@ -131,33 +162,19 @@ namespace Game.UI
         {
             if (_cachedResult == null) return;
 
-            // 1. Claim Items
             UnitInventory playerInventory = FindPlayerInventory();
             if (playerInventory != null)
             {
                 foreach (var reward in _cachedResult.items)
                 {
                     bool success = playerInventory.TryAddItem(reward.item, reward.count);
-                    if (success)
-                    {
-                        Debug.Log($"[BattleOutcome] Claimed {reward.count}x {reward.item.name}");
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"[BattleOutcome] Inventory Full! Lost {reward.item.name}");
-                    }
+                    if (success) Debug.Log($"[BattleOutcome] Claimed {reward.count}x {reward.item.name}");
+                    else Debug.LogWarning($"[BattleOutcome] Inventory Full! Lost {reward.item.name}");
                 }
             }
 
-            // 2. Claim Gold & Exp (Placeholder logic)
-            if (_cachedResult.gold > 0)
-            {
-                Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold (System not connected).");
-            }
-            if (_cachedResult.experience > 0)
-            {
-                Debug.Log($"[Progression] Added {_cachedResult.experience} EXP (System not connected).");
-            }
+            if (_cachedResult.gold > 0) Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold.");
+            if (_cachedResult.experience > 0) Debug.Log($"[Progression] Added {_cachedResult.experience} EXP.");
         }
 
         UnitInventory FindPlayerInventory()
@@ -174,7 +191,7 @@ namespace Game.UI
 
         void OnDefeatRetry()
         {
-            BattleContext.Reset(); // Optional: deciding if retry keeps same loot or rolls new is up to you
+            BattleContext.Reset();
             SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
 

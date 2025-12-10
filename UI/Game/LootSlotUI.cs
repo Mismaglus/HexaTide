@@ -4,20 +4,19 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.EventSystems;
 using Game.Inventory;
-using Game.Units;
 
 namespace Game.UI.Inventory
 {
     /// <summary>
-    /// specialized UI for items in the Reward/Loot window.
-    /// Does not handle "Usage" logic, only "Display" and "Tooltip".
+    /// Specialized UI for displaying loot in the Victory screen.
+    /// Shows Icon, Name, and Type.
     /// </summary>
     public class LootSlotUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
         [Header("Components")]
         public Image iconImage;
-        public TextMeshProUGUI countText;
-        public Image frameImage; // Optional background frame
+        public TextMeshProUGUI nameText;
+        public TextMeshProUGUI typeText;
 
         private InventoryItem _item;
         private SkillTooltipController _tooltipController;
@@ -28,6 +27,8 @@ namespace Game.UI.Inventory
             _rect = GetComponent<RectTransform>();
         }
 
+        // Note: 'count' param is kept for compatibility with BattleOutcomeUI, 
+        // but we ignore it visually as requested (assuming loot is displayed as 1 per line or singular).
         public void Setup(InventoryItem item, int count, SkillTooltipController tooltipCtrl)
         {
             _item = item;
@@ -35,25 +36,44 @@ namespace Game.UI.Inventory
 
             if (_item != null)
             {
-                iconImage.sprite = _item.icon;
-                iconImage.enabled = true;
-                iconImage.preserveAspect = true; // Ensure 3D renders look right
-
-                if (count > 1)
+                // 1. Icon
+                if (iconImage)
                 {
-                    countText.text = count.ToString();
-                    countText.gameObject.SetActive(true);
+                    iconImage.sprite = _item.icon;
+                    iconImage.enabled = true;
+                    iconImage.preserveAspect = true;
                 }
-                else
+
+                // 2. Name
+                if (nameText)
                 {
-                    countText.gameObject.SetActive(false);
+                    // Fallback to .name if LocalizedName is empty, though LocalizedName is preferred
+                    nameText.text = !string.IsNullOrEmpty(_item.LocalizedName) ? _item.LocalizedName : _item.name;
+                }
+
+                // 3. Type
+                if (typeText)
+                {
+                    typeText.text = GetTypeString(_item.type);
                 }
             }
             else
             {
-                // Safety clear
-                iconImage.enabled = false;
-                countText.gameObject.SetActive(false);
+                // Clear visual state if empty
+                if (iconImage) iconImage.enabled = false;
+                if (nameText) nameText.text = "";
+                if (typeText) typeText.text = "";
+            }
+        }
+
+        private string GetTypeString(ItemType type)
+        {
+            switch (type)
+            {
+                case ItemType.Consumable: return "Consumable";
+                case ItemType.Relic: return "Relic";
+                case ItemType.Material: return "Material";
+                default: return "Item";
             }
         }
 
@@ -61,10 +81,8 @@ namespace Game.UI.Inventory
         public void OnPointerEnter(PointerEventData eventData)
         {
             if (_item == null || _tooltipController == null) return;
-
-            // For rewards, we generally pass null as the 'holder' since the item isn't owned yet,
-            // or we could pass the Player Unit to preview scaling.
-            // We'll try to find the player if possible in the parent logic, but passing null is safe.
+            
+            // Show tooltip without specific holder stats context (passed as null)
             _tooltipController.Show(_item, null, _rect);
         }
 

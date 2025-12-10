@@ -35,7 +35,6 @@ namespace Game.Battle
         public event System.Action OnVictory;
         public event System.Action OnDefeat;
 
-        // ⭐ Changed to BattleRewardResult
         public BattleRewardResult Rewards { get; private set; }
 
         readonly List<BattleUnit> _playerUnits = new();
@@ -49,8 +48,11 @@ namespace Game.Battle
         void Awake()
         {
             Instance = this;
-            if (rules == null) rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
-            if (turnController == null) turnController = GetComponentInParent<BattleTurnController>() ?? FindFirstObjectByType<BattleTurnController>(FindObjectsInactive.Exclude);
+
+            if (rules == null)
+                rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
+            if (turnController == null)
+                turnController = GetComponentInParent<BattleTurnController>() ?? FindFirstObjectByType<BattleTurnController>(FindObjectsInactive.Exclude);
 
             CurrentTurn = startingSide;
             RebuildRosters();
@@ -58,17 +60,46 @@ namespace Game.Battle
 
         void Start()
         {
-            if (autoStart) BeginTurn(startingSide, notifyActors: true);
+            if (BattleContext.ActiveLootTable != null)
+                Debug.Log($"[BattleSM] Context Loot Table Active: {BattleContext.ActiveLootTable.name}");
+            else if (defaultLootTable != null)
+                Debug.Log($"[BattleSM] Default Loot Table Active: {defaultLootTable.name}");
+
+            if (autoStart)
+                BeginTurn(startingSide, notifyActors: true);
         }
 
         void OnDisable()
         {
-            if (_enemyTurnRoutine != null) StopCoroutine(_enemyTurnRoutine);
+            if (_enemyTurnRoutine != null)
+            {
+                StopCoroutine(_enemyTurnRoutine);
+                _enemyTurnRoutine = null;
+            }
         }
+
+        // === DEBUG TOOLS ===
+        [ContextMenu("DEBUG: Force Victory")]
+        public void DebugForceVictory()
+        {
+            if (_isBattleEnded) return;
+            Debug.Log("[Debug] Forcing Victory...");
+            EndBattle(true);
+        }
+
+        [ContextMenu("DEBUG: Force Defeat")]
+        public void DebugForceDefeat()
+        {
+            if (_isBattleEnded) return;
+            Debug.Log("[Debug] Forcing Defeat...");
+            EndBattle(false);
+        }
+        // ===================
 
         public void RebuildRosters()
         {
             if (_isBattleEnded) return;
+
             _playerUnits.Clear();
             _enemyUnits.Clear();
 
@@ -78,6 +109,7 @@ namespace Game.Battle
                 if (unit.isPlayer) _playerUnits.Add(unit);
                 else _enemyUnits.Add(unit);
             }
+
             _playerUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
             _enemyUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
 
@@ -165,12 +197,12 @@ namespace Game.Battle
             if (tableToUse != null)
             {
                 Rewards = tableToUse.GenerateRewards();
-                Debug.Log($"[BattleStateMachine] Rewards Generated: {Rewards.gold} Gold, {Rewards.experience} Exp, {Rewards.items.Count} Items.");
+                Debug.Log($"[BattleStateMachine] Rewards Generated: {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
             }
             else
             {
-                Rewards = new BattleRewardResult(); // Empty
-                Debug.LogWarning("[BattleStateMachine] No LootTable found. No rewards generated.");
+                Rewards = new BattleRewardResult();
+                Debug.LogWarning("[BattleStateMachine] No LootTable configured.");
             }
         }
 
@@ -196,6 +228,7 @@ namespace Game.Battle
         IEnumerator RunEnemyTurnRoutine()
         {
             BeginTurn(TurnSide.Enemy, notifyActors: true);
+
             var actors = new List<ITurnActor>(_enemyActors);
             foreach (var actor in actors)
             {
@@ -203,6 +236,7 @@ namespace Game.Battle
                 yield return actor.TakeTurn();
                 if (_isBattleEnded) yield break;
             }
+
             EndCurrentTurn(TurnSide.Enemy);
             BeginTurn(TurnSide.Player, notifyActors: true);
             _enemyTurnRoutine = null;
@@ -211,15 +245,22 @@ namespace Game.Battle
         void BeginTurn(TurnSide side, bool notifyActors)
         {
             if (_isBattleEnded) return;
+
             Cleanup();
             CurrentTurn = side;
+
             var unitsSnapshot = GetUnitsFor(side).ToArray();
-            foreach (var unit in unitsSnapshot) if (unit) unit.OnTurnStart();
+            foreach (var unit in unitsSnapshot)
+            {
+                if (unit) unit.OnTurnStart();
+            }
+
             if (notifyActors)
             {
                 var actorsSnapshot = GetActorsFor(side).ToArray();
                 foreach (var actor in actorsSnapshot) actor?.OnTurnStart();
             }
+
             OnTurnChanged?.Invoke(CurrentTurn);
             Debug.Log($"⚡ Turn Start: {side}");
         }
@@ -227,7 +268,10 @@ namespace Game.Battle
         void EndCurrentTurn(TurnSide side)
         {
             var unitsSnapshot = GetUnitsFor(side).ToArray();
-            foreach (var u in unitsSnapshot) if (u != null) u.OnTurnEnd();
+            foreach (var u in unitsSnapshot)
+            {
+                if (u != null) u.OnTurnEnd();
+            }
         }
 
         void Cleanup()

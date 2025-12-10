@@ -18,6 +18,10 @@ namespace Game.UI
         public GameObject victoryPanel;
         public GameObject defeatPanel;
 
+        [Header("Defeat Section")]
+        [Tooltip("Text label to display score/stats on defeat")]
+        public TextMeshProUGUI defeatScoreText;
+
         [Header("Loot List Configuration")]
         public Transform lootContainer;
         public LootSlotUI lootSlotPrefab;
@@ -40,7 +44,7 @@ namespace Game.UI
         public Button defeatQuitBtn;
 
         private BattleStateMachine _battleSM;
-        private BattleRewardResult _cachedResult;
+        private BattleRewardResult _cachedResult; // Stores Items + Gold + Exp
 
         void Awake()
         {
@@ -116,13 +120,12 @@ namespace Game.UI
             }
         }
 
-        // ⭐ Called when a LootSlotUI is clicked
+        // Called when a LootSlotUI is clicked
         void UpdateDetails(InventoryItem item)
         {
             if (item == null) return;
 
             // 1. Description
-            // We pass 'null' as holder because we are viewing loot, not checking player stats scaling
             if (descriptionText)
             {
                 descriptionText.text = item.GetDynamicDescription(null);
@@ -131,15 +134,12 @@ namespace Game.UI
             // 2. Flavor
             if (flavorText)
             {
-                // Try to get flavor from the wrapped Ability if it's a consumable
                 if (item is ConsumableItem consumable && consumable.abilityToCast != null)
                 {
-                    // Assuming ability has a LocalizedFlavor field
                     flavorText.text = $"<i>\"{consumable.abilityToCast.LocalizedFlavor}\"</i>";
                 }
                 else
                 {
-                    // For now, other items might not have specific flavor text
                     flavorText.text = "";
                 }
             }
@@ -148,6 +148,12 @@ namespace Game.UI
         void HandleDefeat()
         {
             if (defeatPanel) defeatPanel.SetActive(true);
+
+            // ⭐ Show Dummy Score
+            if (defeatScoreText != null)
+            {
+                defeatScoreText.text = BattleScoreCalculator.GetScoreReport();
+            }
         }
 
         void OnVictoryContinue()

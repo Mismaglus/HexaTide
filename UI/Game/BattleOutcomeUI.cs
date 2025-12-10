@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using TMPro; // Added for TextMeshPro
+using TMPro;
 using Game.Battle;
 using Game.Inventory;
 using Game.Units;
@@ -20,9 +20,10 @@ namespace Game.UI
 
         [Header("Loot Configuration")]
         public Transform lootContainer;
-        public InventorySlotUI lootSlotPrefab;
+        [Tooltip("Use the new LootSlotUI prefab here")]
+        public LootSlotUI lootSlotPrefab;
 
-        [Header("Reward Labels (Drag Text Here)")]
+        [Header("Reward Labels")]
         public TextMeshProUGUI labelGold;
         public TextMeshProUGUI labelExp;
 
@@ -86,29 +87,26 @@ namespace Game.UI
         {
             if (rewards == null) return;
 
-            // 1. Show Currency Texts
+            // 1. Show Currency
             if (labelGold) labelGold.text = $"{rewards.gold} G";
             if (labelExp) labelExp.text = $"{rewards.experience} XP";
 
-            // 2. Spawn Items
+            // 2. Spawn Loot Slots
             if (lootContainer == null || lootSlotPrefab == null) return;
 
             foreach (Transform child in lootContainer) Destroy(child.gameObject);
-
-            BattleUnit playerUnit = null;
-            if (_battleSM != null && _battleSM.PlayerUnits.Count > 0)
-                playerUnit = _battleSM.PlayerUnits[0];
 
             for (int i = 0; i < rewards.items.Count; i++)
             {
                 var slotData = rewards.items[i];
                 var go = Instantiate(lootSlotPrefab, lootContainer);
-                var ui = go.GetComponent<InventorySlotUI>();
+
+                // Using LootSlotUI
+                var ui = go.GetComponent<LootSlotUI>();
 
                 if (ui != null)
                 {
-                    ui.Setup(slotData.item, slotData.count, i, null, tooltipController, playerUnit);
-                    ui.SetHighlightState(false);
+                    ui.Setup(slotData.item, slotData.count, tooltipController);
                 }
             }
         }
@@ -121,6 +119,10 @@ namespace Game.UI
         void OnVictoryContinue()
         {
             ClaimRewards();
+
+            // Clean up the context before leaving to avoid it leaking to the next fight
+            BattleContext.Reset();
+
             Debug.Log("Transitioning to Map/Next Level...");
             // SceneManager.LoadScene("MapScene"); 
         }
@@ -136,22 +138,25 @@ namespace Game.UI
                 foreach (var reward in _cachedResult.items)
                 {
                     bool success = playerInventory.TryAddItem(reward.item, reward.count);
-                    if (!success) Debug.LogWarning($"[BattleOutcome] Inventory Full! Lost {reward.item.name}");
+                    if (success)
+                    {
+                        Debug.Log($"[BattleOutcome] Claimed {reward.count}x {reward.item.name}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[BattleOutcome] Inventory Full! Lost {reward.item.name}");
+                    }
                 }
             }
 
-            // 2. Claim Gold & Exp
-            // TODO: Connect this to your PlayerData / SaveSystem
+            // 2. Claim Gold & Exp (Placeholder logic)
             if (_cachedResult.gold > 0)
             {
-                Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold to player wallet (Not implemented yet).");
-                // Example: PlayerWallet.Instance.AddGold(_cachedResult.gold);
+                Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold (System not connected).");
             }
-
             if (_cachedResult.experience > 0)
             {
-                Debug.Log($"[Progression] Added {_cachedResult.experience} EXP to player (Not implemented yet).");
-                // Example: PlayerStats.Instance.AddExp(_cachedResult.experience);
+                Debug.Log($"[Progression] Added {_cachedResult.experience} EXP (System not connected).");
             }
         }
 
@@ -169,11 +174,13 @@ namespace Game.UI
 
         void OnDefeatRetry()
         {
+            BattleContext.Reset(); // Optional: deciding if retry keeps same loot or rolls new is up to you
             SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
 
         void OnDefeatQuit()
         {
+            BattleContext.Reset();
             // SceneManager.LoadScene("MainMenu");
         }
     }

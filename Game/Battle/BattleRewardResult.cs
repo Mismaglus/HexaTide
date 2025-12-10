@@ -5,7 +5,8 @@ using Game.Inventory;
 namespace Game.Battle
 {
     /// <summary>
-    /// Holds the results of the loot generation for the UI to display.
+    /// A container class passed from BattleStateMachine to the UI.
+    /// Represents the "Chest Content" the player won.
     /// </summary>
     public class BattleRewardResult
     {
@@ -15,6 +16,7 @@ namespace Game.Battle
 
         public void AddItem(InventoryItem item, int count)
         {
+            // Merge stacks if item already exists in the list
             var existing = items.Find(x => x.item == item);
             if (existing != null)
             {

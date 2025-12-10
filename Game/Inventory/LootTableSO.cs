@@ -1,7 +1,7 @@
 // Scripts/Game/Inventory/LootTableSO.cs
 using System.Collections.Generic;
-using Game.Battle;
 using UnityEngine;
+using Game.Battle; // For BattleRewardResult
 
 namespace Game.Inventory
 {
@@ -17,28 +17,26 @@ namespace Game.Inventory
             [Min(1)] public int maxAmount = 1;
         }
 
-        [Header("Currency & Progression")]
+        [Header("Currency Rewards")]
         public int minGold = 10;
         public int maxGold = 50;
-        [Space]
-        public int minExp = 100;
-        public int maxExp = 150;
+
+        [Header("Progression Rewards")]
+        public int minExp = 50;
+        public int maxExp = 100;
 
         [Header("Item Drops")]
-        [Tooltip("Fixed items that always check their chance to drop.")]
+        [Tooltip("List of items that can potentially drop.")]
         public List<DropEntry> drops = new List<DropEntry>();
 
-        [Tooltip("How many additional random items to pick from a pool? (Not implemented yet)")]
-        public int randomPicks = 0;
-
         /// <summary>
-        /// Generates the full reward packet (Items + Gold + Exp).
+        /// Calculates the final rewards for a battle instance.
         /// </summary>
         public BattleRewardResult GenerateRewards()
         {
             var result = new BattleRewardResult();
 
-            // 1. Roll Currency
+            // 1. Roll Currency & Exp
             result.gold = Random.Range(minGold, maxGold + 1);
             result.experience = Random.Range(minExp, maxExp + 1);
 

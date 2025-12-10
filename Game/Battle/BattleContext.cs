@@ -1,23 +1,26 @@
 // Scripts/Game/Battle/BattleContext.cs
 using Game.Inventory;
+using UnityEngine;
 
 namespace Game.Battle
 {
     /// <summary>
-    /// Holds transient data for the upcoming or active battle.
-    /// Use this to pass configuration (Enemies, Loot, MapLayout) into the generic Battle Scene.
+    /// Serves as a bridge to pass transient data into the Battle Scene.
+    /// Configure this before loading "BattleScene".
     /// </summary>
     public static class BattleContext
     {
-        // The loot table to use for the next (or current) victory
+        // The specific loot table for the upcoming battle (e.g., "Goblin Drop", "Boss Chest")
         public static LootTableSO ActiveLootTable;
 
         /// <summary>
-        /// Clears data to prevent stale state when returning to main menu.
+        /// Clears the context. Call this when returning to the Map/Menu to ensure 
+        /// the next battle doesn't accidentally use old data.
         /// </summary>
         public static void Reset()
         {
             ActiveLootTable = null;
+            Debug.Log("[BattleContext] Reset.");
         }
     }
 }

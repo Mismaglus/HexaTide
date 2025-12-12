@@ -10,7 +10,7 @@ namespace Game.Battle
     [ExecuteAlways]
     public class BattleHexGrid : MonoBehaviour, IHexGridProvider
     {
-        [Header("网格配方")]
+        [Header("Grid Configuration")]
         [SerializeField] private GridRecipe _recipe;
         [SerializeField, HideInInspector] private uint _version;
 
@@ -25,6 +25,7 @@ namespace Game.Battle
             get => _recipe;
             private set => _recipe = value;
         }
+
         [SerializeField] private bool _useRecipeBorderMode = true;
         [SerializeField] private BorderMode _runtimeBorderMode = BorderMode.AllUnique;
         private BorderMode _lastRuntimeMode;
@@ -36,6 +37,14 @@ namespace Game.Battle
         Material _sharedMat;
         Material _borderMat;
         bool _dirty;
+
+        // Serialized to keep the map centered in the scene view
+        [SerializeField, HideInInspector] private Vector3 _serializedCenterOffset;
+        public Vector3 CenterOffset
+        {
+            get => _serializedCenterOffset;
+            private set => _serializedCenterOffset = value;
+        }
 
         public IEnumerable<TileTag> EnumerateTiles()
         {
@@ -85,42 +94,31 @@ namespace Game.Battle
         {
             if (!isActiveAndEnabled) return;
 
+            // Default fallback
             if (recipe == null)
             {
                 recipe = ScriptableObject.CreateInstance<GridRecipe>();
+                recipe.shape = GridShape.Rectangle;
                 recipe.width = 6; recipe.height = 6;
-                recipe.outerRadius = 1f; recipe.thickness = 0f;
+                recipe.outerRadius = 1f;
                 recipe.useOddROffset = true;
                 recipe.borderMode = BorderMode.AllUnique;
             }
 
             ClearChildren();
+            SetupMaterials();
 
-            if (recipe.tileMaterial != null) _sharedMat = recipe.tileMaterial;
-            else if (_sharedMat == null)
-            {
-                var shader = Shader.Find("Universal Render Pipeline/Lit");
-                _sharedMat = new Material(shader) { color = new Color(0.18f, 0.2f, 0.25f, 1f) };
-            }
-
-            if (recipe.borderMaterial != null) _borderMat = recipe.borderMaterial;
-            else if (_borderMat == null)
-            {
-                var sh = Shader.Find("Universal Render Pipeline/Unlit");
-                _borderMat = new Material(sh);
-                _borderMat.SetFloat("_Surface", 1f);
-                _borderMat.SetFloat("_ZWrite", 0f);
-                _borderMat.SetFloat("_Cull", 0f);
-                _borderMat.renderQueue = (int)RenderQueue.Transparent;
-            }
-
+            // 1. Build the Mask (Rectangle or Hexagon)
             var mask = BuildMask(recipe);
+
+            // 2. Compute visual bounds to center the grid
             var worldBounds = HexBorderMeshBuilder.ComputeWorldBounds(mask, recipe.outerRadius, recipe.useOddROffset);
             CenterOffset = new Vector3(worldBounds.center.x, 0f, worldBounds.center.z);
 
-            for (int r = 0; r < recipe.height; r++)
+            // 3. Instantiate Tiles
+            for (int r = 0; r < mask.Height; r++)
             {
-                for (int q = 0; q < recipe.width; q++)
+                for (int q = 0; q < mask.Width; q++)
                 {
                     if (!mask[q, r]) continue;
 
@@ -142,54 +140,110 @@ namespace Game.Battle
                     var tag = go.AddComponent<TileTag>();
                     tag.Set(q, r);
 
-                    // ? 新增：添加 HexCell 数据组件
+                    // Add HexCell for logic
                     var cell = go.AddComponent<HexCell>();
-                    // 简单示例：如果是边缘或者特定列，可以设为沼泽 (原型测试用)
-                    // if (Random.value < 0.1f) cell.terrainType = HexTerrainType.Swamp;
                 }
             }
 
-            var mode = _useRecipeBorderMode ? recipe.borderMode : _runtimeBorderMode;
-            if (mode != BorderMode.None)
+            // 4. Build Borders
+            BuildBorders(mask);
+        }
+
+        private void SetupMaterials()
+        {
+            if (recipe.tileMaterial != null) _sharedMat = recipe.tileMaterial;
+            else if (_sharedMat == null)
             {
-                var bordersGO = new GameObject("GridBorders");
-                bordersGO.transform.SetParent(transform, false);
-
-                var mf = bordersGO.AddComponent<MeshFilter>();
-                var mr = bordersGO.AddComponent<MeshRenderer>();
-                mr.sharedMaterial = _borderMat;
-
-                var mesh = HexBorderMeshBuilder.Build(
-                    mask,
-                    recipe.outerRadius, recipe.borderYOffset, recipe.thickness,
-                    recipe.borderWidth, recipe.useOddROffset,
-                    mode
-                );
-                mf.sharedMesh = mesh;
-
-                var mpb = new MaterialPropertyBlock();
-                mpb.SetColor("_BaseColor", recipe.borderColor);
-                mpb.SetColor("_Color", recipe.borderColor);
-                mr.SetPropertyBlock(mpb);
+                var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+                _sharedMat = new Material(shader) { color = new Color(0.18f, 0.2f, 0.25f, 1f) };
             }
+
+            if (recipe.borderMaterial != null) _borderMat = recipe.borderMaterial;
+            else if (_borderMat == null)
+            {
+                var sh = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+                _borderMat = new Material(sh);
+                if (_borderMat.HasProperty("_Surface")) _borderMat.SetFloat("_Surface", 1f);
+                if (_borderMat.HasProperty("_ZWrite")) _borderMat.SetFloat("_ZWrite", 0f);
+                if (_borderMat.HasProperty("_Cull")) _borderMat.SetFloat("_Cull", 0f);
+                _borderMat.renderQueue = (int)RenderQueue.Transparent;
+            }
+        }
+
+        private void BuildBorders(HexMask mask)
+        {
+            var mode = _useRecipeBorderMode ? recipe.borderMode : _runtimeBorderMode;
+            if (mode == BorderMode.None) return;
+
+            var bordersGO = new GameObject("GridBorders");
+            bordersGO.transform.SetParent(transform, false);
+
+            var mf = bordersGO.AddComponent<MeshFilter>();
+            var mr = bordersGO.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _borderMat;
+
+            var mesh = HexBorderMeshBuilder.Build(
+                mask,
+                recipe.outerRadius, recipe.borderYOffset, recipe.thickness,
+                recipe.borderWidth, recipe.useOddROffset,
+                mode
+            );
+            mf.sharedMesh = mesh;
+
+            var mpb = new MaterialPropertyBlock();
+            mpb.SetColor("_BaseColor", recipe.borderColor);
+            mpb.SetColor("_Color", recipe.borderColor);
+            mr.SetPropertyBlock(mpb);
         }
 
         HexMask BuildMask(GridRecipe rcp)
         {
-            int w = rcp.width, h = rcp.height;
-            var mask = HexMask.Filled(w, h);
+            HexMask mask;
 
-            if (rcp.emptyColumns != null)
+            if (rcp.shape == GridShape.Hexagon)
             {
-                foreach (var col in rcp.emptyColumns)
+                // Hexagon Generation:
+                // Create a bounding box large enough (Diameter approx 2*Radius + 1)
+                // Use offset coords, iterate, check distance from "Center Hex"
+                int size = rcp.radius * 2 + 1;
+                // Add padding for safety
+                int w = size + 2;
+                int h = size + 2;
+
+                mask = new HexMask(w, h);
+
+                // Center roughly in the middle of the mask array
+                // For offset coordinates, (Radius, Radius) is roughly center
+                HexCoords centerHex = new HexCoords(rcp.radius + 1, rcp.radius + 1);
+
+                for (int r = 0; r < h; r++)
                 {
-                    if (col < 0 || col >= w) continue;
-                    mask.ClearColumn(col);
+                    for (int q = 0; q < w; q++)
+                    {
+                        var current = new HexCoords(q, r);
+                        if (current.DistanceTo(centerHex) <= rcp.radius)
+                        {
+                            mask[q, r] = true;
+                        }
+                    }
+                }
+            }
+            else // Rectangle
+            {
+                mask = HexMask.Filled(rcp.width, rcp.height);
+
+                // Only apply column holes in rectangle mode for now (or update logic if needed)
+                if (rcp.emptyColumns != null)
+                {
+                    foreach (var col in rcp.emptyColumns)
+                        mask.ClearColumn(col);
                 }
             }
 
+            // Apply random holes to both shapes
             if (rcp.enableRandomHoles && rcp.holeChance > 0f)
                 mask.RandomHoles(rcp.holeChance, rcp.randomSeed);
+
             Version++;
             return mask;
         }
@@ -205,8 +259,10 @@ namespace Game.Battle
             unchecked
             {
                 int h = 17;
+                h = h * 31 + (int)recipe.shape;
                 h = h * 31 + recipe.width;
                 h = h * 31 + recipe.height;
+                h = h * 31 + recipe.radius; // Track radius
                 h = h * 31 + recipe.useOddROffset.GetHashCode();
                 h = h * 31 + recipe.borderMode.GetHashCode();
                 h = h * 31 + recipe.outerRadius.GetHashCode();
@@ -223,14 +279,6 @@ namespace Game.Battle
                 h = h * 31 + recipe.randomSeed;
                 return h;
             }
-        }
-
-        [SerializeField, HideInInspector] private Vector3 _serializedCenterOffset;
-
-        public Vector3 CenterOffset
-        {
-            get => _serializedCenterOffset;
-            private set => _serializedCenterOffset = value;
         }
 
         public Vector3 GetTileWorldPosition(HexCoords c)

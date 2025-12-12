@@ -13,6 +13,16 @@ namespace Game.Battle
         Enemy
     }
 
+    public enum BattleState
+    {
+        Playing,
+        Victory,
+        Defeat
+    }
+
+    /// <summary>
+    /// Coordinates high level battle turn flow, win conditions, and loot generation.
+    /// </summary>
     public class BattleStateMachine : MonoBehaviour
     {
         public static BattleStateMachine Instance { get; private set; }
@@ -29,25 +39,31 @@ namespace Game.Battle
         [Tooltip("Default loot table used if BattleContext.ActiveLootTable is null.")]
         [SerializeField] private LootTableSO defaultLootTable;
 
+        // ⭐ Public State for UI Polling
+        public BattleState State { get; private set; } = BattleState.Playing;
+
         public TurnSide CurrentTurn { get; private set; } = TurnSide.Player;
         public event System.Action<TurnSide> OnTurnChanged;
 
+        // Win/Loss Events
         public event System.Action OnVictory;
         public event System.Action OnDefeat;
 
+        // Rewards Storage
         public BattleRewardResult Rewards { get; private set; }
 
         readonly List<BattleUnit> _playerUnits = new();
         readonly List<BattleUnit> _enemyUnits = new();
+
         readonly List<ITurnActor> _playerActors = new();
         readonly List<ITurnActor> _enemyActors = new();
 
         Coroutine _enemyTurnRoutine;
-        bool _isBattleEnded = false;
 
         void Awake()
         {
             Instance = this;
+            State = BattleState.Playing; // Reset state on load
 
             if (rules == null)
                 rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
@@ -60,6 +76,7 @@ namespace Game.Battle
 
         void Start()
         {
+            // Debug Log for Loot Table
             if (BattleContext.ActiveLootTable != null)
                 Debug.Log($"[BattleSM] Context Loot Table Active: {BattleContext.ActiveLootTable.name}");
             else if (defaultLootTable != null)
@@ -78,27 +95,27 @@ namespace Game.Battle
             }
         }
 
-        // === DEBUG TOOLS ===
+        // === DEBUG TOOLS (Right-click component in Inspector) ===
         [ContextMenu("DEBUG: Force Victory")]
         public void DebugForceVictory()
         {
-            if (_isBattleEnded) return;
-            Debug.Log("[Debug] Forcing Victory...");
+            if (State != BattleState.Playing) return;
+            Debug.Log("[BattleSM] Debug Force Victory triggered.");
             EndBattle(true);
         }
 
         [ContextMenu("DEBUG: Force Defeat")]
         public void DebugForceDefeat()
         {
-            if (_isBattleEnded) return;
-            Debug.Log("[Debug] Forcing Defeat...");
+            if (State != BattleState.Playing) return;
+            Debug.Log("[BattleSM] Debug Force Defeat triggered.");
             EndBattle(false);
         }
-        // ===================
+        // ========================================================
 
         public void RebuildRosters()
         {
-            if (_isBattleEnded) return;
+            if (State != BattleState.Playing) return;
 
             _playerUnits.Clear();
             _enemyUnits.Clear();
@@ -110,6 +127,7 @@ namespace Game.Battle
                 else _enemyUnits.Add(unit);
             }
 
+            // Sort ensures deterministic order
             _playerUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
             _enemyUnits.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
 
@@ -129,6 +147,7 @@ namespace Game.Battle
             }
             else
             {
+                // Fallback scan
                 foreach (var mono in FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
                 {
                     if (mono is not ITurnActor actor) continue;
@@ -140,7 +159,8 @@ namespace Game.Battle
 
         public void OnUnitDied(BattleUnit unit)
         {
-            if (_isBattleEnded) return;
+            // If battle already ended, ignore deaths
+            if (State != BattleState.Playing) return;
 
             if (unit.isPlayer) _playerUnits.Remove(unit);
             else _enemyUnits.Remove(unit);
@@ -157,29 +177,36 @@ namespace Game.Battle
 
         void CheckBattleOutcome()
         {
+            // Defeat: No real players left (ignoring summons)
             bool hasRealPlayerCharacter = _playerUnits.Any(u => u != null && !u.isSummon);
+
             if (!hasRealPlayerCharacter)
             {
-                EndBattle(false);
+                EndBattle(false); // Defeat
                 return;
             }
 
+            // Victory: No enemies left
             if (_enemyUnits.Count == 0)
             {
-                EndBattle(true);
+                EndBattle(true); // Victory
                 return;
             }
         }
 
         void EndBattle(bool playerWon)
         {
-            _isBattleEnded = true;
+            // 1. Set State immediately
+            State = playerWon ? BattleState.Victory : BattleState.Defeat;
+
+            // 2. Stop turns
             if (_enemyTurnRoutine != null) StopCoroutine(_enemyTurnRoutine);
 
             if (playerWon)
             {
                 Debug.Log("🏆 VICTORY!");
                 CalculateRewards();
+                // 3. Fire Events (for listeners already active)
                 OnVictory?.Invoke();
             }
             else
@@ -191,7 +218,10 @@ namespace Game.Battle
 
         private void CalculateRewards()
         {
+            // 1. Prioritize Context
             LootTableSO tableToUse = BattleContext.ActiveLootTable;
+
+            // 2. Fallback
             if (tableToUse == null) tableToUse = defaultLootTable;
 
             if (tableToUse != null)
@@ -202,7 +232,7 @@ namespace Game.Battle
             else
             {
                 Rewards = new BattleRewardResult();
-                Debug.LogWarning("[BattleStateMachine] No LootTable configured.");
+                Debug.LogWarning("[BattleStateMachine] No LootTable configured. No rewards generated.");
             }
         }
 
@@ -217,11 +247,14 @@ namespace Game.Battle
 
         public void EndTurnRequest()
         {
-            if (_isBattleEnded) return;
+            if (State != BattleState.Playing) return;
             if (CurrentTurn != TurnSide.Player) return;
             if (_enemyTurnRoutine != null) return;
 
+            // End Player Phase
             EndCurrentTurn(TurnSide.Player);
+
+            // Start Enemy Phase
             _enemyTurnRoutine = StartCoroutine(RunEnemyTurnRoutine());
         }
 
@@ -234,21 +267,25 @@ namespace Game.Battle
             {
                 if (actor == null || (actor is MonoBehaviour mb && mb == null)) continue;
                 yield return actor.TakeTurn();
-                if (_isBattleEnded) yield break;
+
+                if (State != BattleState.Playing) yield break;
             }
 
             EndCurrentTurn(TurnSide.Enemy);
+
+            // Back to Player
             BeginTurn(TurnSide.Player, notifyActors: true);
             _enemyTurnRoutine = null;
         }
 
         void BeginTurn(TurnSide side, bool notifyActors)
         {
-            if (_isBattleEnded) return;
+            if (State != BattleState.Playing) return;
 
             Cleanup();
             CurrentTurn = side;
 
+            // Trigger OnTurnStart (e.g. DoT effects)
             var unitsSnapshot = GetUnitsFor(side).ToArray();
             foreach (var unit in unitsSnapshot)
             {
@@ -258,7 +295,10 @@ namespace Game.Battle
             if (notifyActors)
             {
                 var actorsSnapshot = GetActorsFor(side).ToArray();
-                foreach (var actor in actorsSnapshot) actor?.OnTurnStart();
+                foreach (var actor in actorsSnapshot)
+                {
+                    actor?.OnTurnStart();
+                }
             }
 
             OnTurnChanged?.Invoke(CurrentTurn);

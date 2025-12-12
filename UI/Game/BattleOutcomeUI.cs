@@ -1,25 +1,27 @@
 // Scripts/UI/Game/BattleOutcomeUI.cs
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using Game.Battle;
 using Game.Inventory;
 using Game.Units;
 using Game.UI.Inventory;
+using System.Collections.Generic;
 using System.Linq;
-using UnityEngine.SceneManagement;
 
 namespace Game.UI
 {
     public class BattleOutcomeUI : MonoBehaviour
     {
         [Header("Panels")]
-        [Tooltip("Assign the Child Panel 'VictoryPanel' here. Keep Main Object Active.")]
+        [Tooltip("The GameObject containing the Victory UI elements (Background, Loot, Buttons)")]
         public GameObject victoryPanel;
-        [Tooltip("Assign the Child Panel 'DefeatPanel' here.")]
+        [Tooltip("The GameObject containing the Defeat UI elements")]
         public GameObject defeatPanel;
 
         [Header("Defeat Section")]
+        [Tooltip("Text label to display score/stats on defeat")]
         public TextMeshProUGUI defeatScoreText;
 
         [Header("Loot List Configuration")]
@@ -27,9 +29,12 @@ namespace Game.UI
         public LootSlotUI lootSlotPrefab;
 
         [Header("Loot Details Panel")]
+        [Tooltip("Text to show description of selected item")]
         public TextMeshProUGUI descriptionText;
+        [Tooltip("Text to show flavor/lore of selected item")]
         public TextMeshProUGUI flavorText;
-        [TextArea] public string defaultHint = "Select an item to view details.";
+        [TextArea]
+        public string defaultHint = "Select an item to view details.";
 
         [Header("Reward Summary Labels")]
         public TextMeshProUGUI labelGold;
@@ -46,9 +51,12 @@ namespace Game.UI
         private BattleStateMachine _battleSM;
         private BattleRewardResult _cachedResult;
 
+        // Track if we have already displayed the result to prevent repeated calls in Update
+        private bool _hasShownOutcome = false;
+
         void Awake()
         {
-            // Initial State: Panels Hidden, but THIS script's object must be Active
+            // Ensure we start clean, but keep THIS script's GameObject active to run Update()
             if (victoryPanel) victoryPanel.SetActive(false);
             if (defeatPanel) defeatPanel.SetActive(false);
 
@@ -59,90 +67,104 @@ namespace Game.UI
             if (!tooltipController) tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
         }
 
-        void OnEnable()
+        void Start()
         {
-            // Subscribe here to catch re-enabling
-            BindToStateMachine();
+            _battleSM = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Include);
+
+            // Note: We primarily rely on Update() polling now for safety, but Events are okay too.
         }
 
-        void OnDisable()
+        // ⭐ ROBUSTNESS: Check State every frame. 
+        // This solves the issue where OnVictory event fires before this UI is ready/subscribed.
+        void Update()
         {
-            if (_battleSM != null)
-            {
-                _battleSM.OnVictory -= HandleVictory;
-                _battleSM.OnDefeat -= HandleDefeat;
-            }
-        }
-
-        void BindToStateMachine()
-        {
+            if (_hasShownOutcome) return;
             if (_battleSM == null)
-                _battleSM = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Include);
-
-            if (_battleSM != null)
             {
-                // Unsub first to prevent duplicates
-                _battleSM.OnVictory -= HandleVictory;
-                _battleSM.OnDefeat -= HandleDefeat;
-
-                _battleSM.OnVictory += HandleVictory;
-                _battleSM.OnDefeat += HandleDefeat;
-                Debug.Log("[BattleOutcomeUI] Successfully bound to BattleStateMachine events.");
+                _battleSM = BattleStateMachine.Instance;
+                return;
             }
-            else
+
+            // Check State Machine
+            if (_battleSM.State == BattleState.Victory)
             {
-                Debug.LogWarning("[BattleOutcomeUI] Waiting for BattleStateMachine...");
+                ShowVictoryPanel();
+                _hasShownOutcome = true;
+            }
+            else if (_battleSM.State == BattleState.Defeat)
+            {
+                ShowDefeatPanel();
+                _hasShownOutcome = true;
             }
         }
 
-        void HandleVictory()
+        void ShowVictoryPanel()
         {
-            Debug.Log("[BattleOutcomeUI] VICTORY EVENT RECEIVED");
+            Debug.Log("[BattleOutcomeUI] Showing Victory Panel");
 
-            // 1. Activate Panel
             if (victoryPanel)
             {
                 victoryPanel.SetActive(true);
-                ForcePanelVisibility(victoryPanel);
+
+                // Force Visual Properties in case they were stuck
+                CanvasGroup cg = victoryPanel.GetComponent<CanvasGroup>();
+                if (cg == null) cg = victoryPanel.AddComponent<CanvasGroup>();
+                cg.alpha = 1f;
+                cg.blocksRaycasts = true;
+                cg.interactable = true;
+
+                // Bring to front
+                victoryPanel.transform.SetAsLastSibling();
+            }
+            else
+            {
+                Debug.LogError("[BattleOutcomeUI] Victory Panel reference missing!");
             }
 
-            // 2. Reset Details
+            // Reset Texts
             if (descriptionText) descriptionText.text = defaultHint;
             if (flavorText) flavorText.text = "";
 
-            // 3. Show Loot
-            if (_battleSM != null)
+            // Populate Data
+            if (_battleSM != null && _battleSM.Rewards != null)
             {
                 _cachedResult = _battleSM.Rewards;
-                ShowRewards(_cachedResult);
+                PopulateRewards(_cachedResult);
             }
         }
 
-        void ForcePanelVisibility(GameObject panel)
+        void ShowDefeatPanel()
         {
-            // Fix alpha issues
-            var cg = panel.GetComponent<CanvasGroup>();
-            if (cg != null)
+            Debug.Log("[BattleOutcomeUI] Showing Defeat Panel");
+
+            if (defeatPanel)
             {
+                defeatPanel.SetActive(true);
+
+                CanvasGroup cg = defeatPanel.GetComponent<CanvasGroup>();
+                if (cg == null) cg = defeatPanel.AddComponent<CanvasGroup>();
                 cg.alpha = 1f;
-                cg.interactable = true;
                 cg.blocksRaycasts = true;
+                cg.interactable = true;
+
+                defeatPanel.transform.SetAsLastSibling();
             }
 
-            // Fix layout issues
-            LayoutRebuilder.ForceRebuildLayoutImmediate(panel.transform as RectTransform);
-
-            // Ensure on top
-            panel.transform.SetAsLastSibling();
+            if (defeatScoreText)
+            {
+                defeatScoreText.text = BattleScoreCalculator.GetScoreReport();
+            }
         }
 
-        void ShowRewards(BattleRewardResult rewards)
+        void PopulateRewards(BattleRewardResult rewards)
         {
             if (rewards == null) return;
 
+            // 1. Show Currency
             if (labelGold) labelGold.text = $"{rewards.gold} G";
             if (labelExp) labelExp.text = $"{rewards.experience} XP";
 
+            // 2. Spawn Items
             if (lootContainer && lootSlotPrefab)
             {
                 foreach (Transform child in lootContainer) Destroy(child.gameObject);
@@ -152,58 +174,106 @@ namespace Game.UI
                     var slotData = rewards.items[i];
                     var go = Instantiate(lootSlotPrefab, lootContainer);
                     var ui = go.GetComponent<LootSlotUI>();
-                    if (ui) ui.Setup(slotData.item, UpdateDetails);
+                    if (ui)
+                    {
+                        ui.Setup(slotData.item, OnItemClicked);
+                    }
+                }
+
+                // Force Layout Rebuild to fix Unity UI 0-size bugs on first frame
+                Canvas.ForceUpdateCanvases();
+                LayoutRebuilder.ForceRebuildLayoutImmediate(lootContainer as RectTransform);
+            }
+        }
+
+        // Callback from LootSlotUI
+        void OnItemClicked(InventoryItem item)
+        {
+            if (item == null) return;
+
+            // Update Description
+            if (descriptionText) descriptionText.text = item.GetDynamicDescription(null);
+
+            // Update Flavor
+            if (flavorText)
+            {
+                if (item is ConsumableItem c && c.abilityToCast != null)
+                {
+                    flavorText.text = $"<i>\"{c.abilityToCast.LocalizedFlavor}\"</i>";
+                }
+                else
+                {
+                    flavorText.text = "";
                 }
             }
         }
 
-        void UpdateDetails(InventoryItem item)
-        {
-            if (item == null) return;
-            if (descriptionText) descriptionText.text = item.GetDynamicDescription(null);
-            if (flavorText)
-            {
-                if (item is ConsumableItem c && c.abilityToCast != null)
-                    flavorText.text = $"<i>\"{c.abilityToCast.LocalizedFlavor}\"</i>";
-                else flavorText.text = "";
-            }
-        }
-
-        void HandleDefeat()
-        {
-            Debug.Log("[BattleOutcomeUI] DEFEAT EVENT RECEIVED");
-            if (defeatPanel)
-            {
-                defeatPanel.SetActive(true);
-                ForcePanelVisibility(defeatPanel);
-            }
-            if (defeatScoreText) defeatScoreText.text = BattleScoreCalculator.GetScoreReport();
-        }
-
-        // ... Button Handlers remain same ...
         void OnVictoryContinue()
         {
             ClaimRewards();
+
+            // Reset context so next battle is fresh
             BattleContext.Reset();
-            Debug.Log("Loading Next Scene...");
-            // SceneManager.LoadScene("MapScene"); 
+
+            Debug.Log("[BattleOutcomeUI] Continue clicked. Transitioning to Map/Next Level...");
+            // Example: SceneManager.LoadScene("MapScene"); 
         }
 
-        void OnDefeatRetry() { BattleContext.Reset(); SceneManager.LoadScene(SceneManager.GetActiveScene().name); }
-        void OnDefeatQuit() { BattleContext.Reset(); /* Load Main Menu */ }
+        void OnDefeatRetry()
+        {
+            Debug.Log("[BattleOutcomeUI] Retry clicked. Reloading scene...");
+            // Keep context active for retry? Or clear? 
+            // Usually retry implies same battle settings, so we might NOT clear context here.
+            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        }
+
+        void OnDefeatQuit()
+        {
+            Debug.Log("[BattleOutcomeUI] Quit clicked.");
+            BattleContext.Reset();
+            // SceneManager.LoadScene("MainMenu");
+        }
 
         void ClaimRewards()
         {
             if (_cachedResult == null) return;
 
-            // Find Inventory logic...
-            UnitInventory playerInv = FindObjectsByType<BattleUnit>(FindObjectsSortMode.None).FirstOrDefault(u => u.isPlayer)?.GetComponent<UnitInventory>();
+            // Find Player Inventory
+            UnitInventory playerInventory = null;
 
-            if (playerInv)
+            // Method 1: Ask SM
+            if (_battleSM != null && _battleSM.PlayerUnits.Count > 0)
             {
-                foreach (var r in _cachedResult.items) playerInv.TryAddItem(r.item, r.count);
-                Debug.Log($"Claimed {_cachedResult.items.Count} stacks of items.");
+                // Note: The player unit might be null if they died, but usually 1 persists or we grab from roster
+                var p = _battleSM.PlayerUnits.FirstOrDefault(u => u != null);
+                if (p) playerInventory = p.GetComponent<UnitInventory>();
             }
+
+            // Method 2: Fallback search
+            if (playerInventory == null)
+            {
+                var p = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
+                        .FirstOrDefault(u => u.isPlayer);
+                if (p) playerInventory = p.GetComponent<UnitInventory>();
+            }
+
+            if (playerInventory != null)
+            {
+                foreach (var reward in _cachedResult.items)
+                {
+                    bool success = playerInventory.TryAddItem(reward.item, reward.count);
+                    if (success) Debug.Log($"[BattleOutcome] Claimed {reward.count}x {reward.item.name}");
+                    else Debug.LogWarning($"[BattleOutcome] Inventory Full! Lost {reward.item.name}");
+                }
+            }
+            else
+            {
+                Debug.LogError("[BattleOutcomeUI] Could not find Player UnitInventory to claim rewards!");
+            }
+
+            // Claim Currency
+            if (_cachedResult.gold > 0) Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold (System not connected).");
+            if (_cachedResult.experience > 0) Debug.Log($"[Progression] Added {_cachedResult.experience} EXP (System not connected).");
         }
     }
 }

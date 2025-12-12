@@ -207,16 +207,19 @@ namespace Game.UI
                 }
             }
         }
-
         void OnVictoryContinue()
         {
             ClaimRewards();
-
-            // Reset context so next battle is fresh
             BattleContext.Reset();
 
-            Debug.Log("[BattleOutcomeUI] Continue clicked. Transitioning to Map/Next Level...");
-            // Example: SceneManager.LoadScene("MapScene"); 
+            // ⭐ NEW: Mark current map node as cleared in persistence
+            if (Game.World.MapRuntimeData.HasData)
+            {
+                Game.World.MapRuntimeData.ClearedNodes.Add(Game.World.MapRuntimeData.PlayerPosition);
+            }
+
+            // Return to Map
+            SceneManager.LoadScene("MapScene");
         }
 
         void OnDefeatRetry()

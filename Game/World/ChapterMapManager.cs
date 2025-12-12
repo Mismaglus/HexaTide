@@ -2,31 +2,23 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Core.Hex;
-using Game.Battle; // For BattleHexGrid, GridRecipe
-using Game.Grid;   // For HexCell, HexPathfinder
-using Game.Units;  // For Unit, UnitMover
+using Game.Battle;
+using Game.Grid;
+using Game.Units;
 using System.Linq;
-using Game.Core;
 
 namespace Game.World
 {
-    /// <summary>
-    /// Manages the logic for the Chapter Map (Act Layer).
-    /// Handles Map Generation, Node Content, and the Rising Tide system.
-    /// </summary>
     public class ChapterMapManager : MonoBehaviour
     {
         public static ChapterMapManager Instance { get; private set; }
 
         [Header("Grid References")]
         public BattleHexGrid grid;
-        public GridRecipe mapRecipe; // Ensure this is set to HEXAGON shape
+        public GridRecipe mapRecipe;
 
         [Header("Tide Configuration")]
-        [Tooltip("How many moves the player makes before the tide rises 1 row.")]
         public int movesPerTideStep = 3;
-
-        [Tooltip("Delay in seconds for the tide animation/effect.")]
         public float tideAnimationDelay = 0.5f;
 
         [Header("Generation Settings")]
@@ -35,13 +27,17 @@ namespace Game.World
         public int mysteryCount = 4;
 
         // Runtime State
+        private int _currentSeed;
         private int _playerMoveCount = 0;
-        private int _currentTideRow = int.MinValue; // The highest 'r' row covered by tide
+        private int _currentTideRow = int.MinValue;
         private int _minRow;
         private int _maxRow;
 
         private Unit _playerUnit;
         private Dictionary<HexCoords, ChapterNode> _nodes = new Dictionary<HexCoords, ChapterNode>();
+
+        public int CurrentTideRow => _currentTideRow;
+        public int MovesBeforeNextTide => movesPerTideStep - (_playerMoveCount % movesPerTideStep);
 
         void Awake()
         {
@@ -51,8 +47,20 @@ namespace Game.World
 
         void Start()
         {
-            GenerateMap();
+            // ⭐ Phase 4 Logic: Check for saved state
+            if (MapRuntimeData.HasData)
+            {
+                RestoreMapState();
+            }
+            else
+            {
+                GenerateNewMap();
+            }
+
             InitializePlayer();
+
+            // Apply visual updates after player is placed
+            UpdateTideVisuals();
         }
 
         void OnDestroy()
@@ -64,32 +72,58 @@ namespace Game.World
         }
 
         // =========================================================
-        // 1. Map Generation
+        // Generation / Restoration
         // =========================================================
 
-        public void GenerateMap()
+        void GenerateNewMap()
         {
-            if (grid == null || mapRecipe == null)
-            {
-                Debug.LogError("[ChapterMapManager] Missing Grid or Recipe!");
-                return;
-            }
+            // Pick a new seed
+            _currentSeed = (int)System.DateTime.Now.Ticks;
 
-            // Force recipe to Hexagon for Chapter Map
-            if (mapRecipe.shape != GridShape.Hexagon)
-            {
-                Debug.LogWarning("[ChapterMapManager] Recipe is not Hexagon. Forcing generation might look wrong.");
-            }
+            GenerateGridGeometry(_currentSeed);
+            AssignContent(); // Randomly place content
 
-            // 1. Build Grid Geometry
+            // Tide starts 1 row below
+            _currentTideRow = _minRow - 1;
+        }
+
+        void RestoreMapState()
+        {
+            Debug.Log("[ChapterMapManager] Restoring Map from Save...");
+
+            // 1. Restore Seed & Geometry
+            _currentSeed = MapRuntimeData.MapSeed;
+            GenerateGridGeometry(_currentSeed);
+
+            // 2. Re-run Content Assignment (Deterministic because we reset RNG with same seed)
+            AssignContent();
+
+            // 3. Restore Vars
+            _currentTideRow = MapRuntimeData.CurrentTideRow;
+            _playerMoveCount = MapRuntimeData.MovesTaken;
+
+            // 4. Apply "Cleared" status
+            foreach (var coord in MapRuntimeData.ClearedNodes)
+            {
+                if (_nodes.TryGetValue(coord, out var node))
+                {
+                    node.SetCleared(true);
+                }
+            }
+        }
+
+        void GenerateGridGeometry(int seed)
+        {
+            if (grid == null || mapRecipe == null) return;
+
+            // Ensure determinism for holes
+            mapRecipe.randomSeed = seed;
             grid.Rebuild();
 
-            // 2. Analyze Grid & Create Nodes
             _nodes.Clear();
             var allTiles = grid.EnumerateTiles().ToList();
             if (allTiles.Count == 0) return;
 
-            // Calculate Bounds
             _minRow = int.MaxValue;
             _maxRow = int.MinValue;
 
@@ -98,33 +132,18 @@ namespace Game.World
                 if (tile.Coords.r < _minRow) _minRow = tile.Coords.r;
                 if (tile.Coords.r > _maxRow) _maxRow = tile.Coords.r;
 
-                // Add Node Component
-                var cell = tile.GetComponent<HexCell>();
                 var node = tile.GetComponent<ChapterNode>();
                 if (node == null) node = tile.gameObject.AddComponent<ChapterNode>();
 
                 _nodes[tile.Coords] = node;
-
-                // Default to normal
                 node.Initialize(ChapterNodeType.NormalEnemy);
             }
-
-            // 3. Assign Special Nodes
-            AssignContent();
-
-            // 4. Initialize Tide
-            // Tide starts 1 row below the map so the first row is safe initially
-            _currentTideRow = _minRow - 1;
-            UpdateTideVisuals();
-
-            Debug.Log($"[ChapterMapManager] Generated Map. Rows: {_minRow} to {_maxRow}. Nodes: {_nodes.Count}");
         }
 
         void AssignContent()
         {
-            // A. Find Start (Bottom Center) and Boss (Top Center)
-            // In Pointy-Top Hex grids generated by our logic, 'r' increases South->North.
-            // Center 'q' usually correlates to 'r' in offset coords, but let's find the geometric center of the row.
+            // Initialize RNG with the Map Seed to ensure nodes are placed in the same spots
+            Game.Common.GameRandom.Init(_currentSeed);
 
             var bottomRowNodes = GetNodesInRow(_minRow);
             var topRowNodes = GetNodesInRow(_maxRow);
@@ -132,51 +151,54 @@ namespace Game.World
             HexCoords startCoords = GetCenterOfRow(bottomRowNodes);
             HexCoords bossCoords = GetCenterOfRow(topRowNodes);
 
-            if (_nodes.ContainsKey(startCoords))
-                _nodes[startCoords].Initialize(ChapterNodeType.Start);
+            if (_nodes.ContainsKey(startCoords)) _nodes[startCoords].Initialize(ChapterNodeType.Start);
+            if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
 
-            if (_nodes.ContainsKey(bossCoords))
-                _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
+            var validCandidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();
 
-            // B. Assign Random Content (Elites, Merchants, etc.)
-            // Filter out Start, Boss, and ensure we don't pick them
-            var validCandidates = _nodes.Values
-                .Where(n => n.type == ChapterNodeType.NormalEnemy) // currently just normal
-                .ToList();
-
-            // Shuffle
-            Game.Common.GameRandom.Init(System.DateTime.Now.Millisecond); // Or use fixed seed
+            // Deterministic Shuffle
             validCandidates.Sort((a, b) => Game.Common.GameRandom.Range(0, 2) == 0 ? -1 : 1);
 
             int assigned = 0;
-            // Elites
             for (int i = 0; i < eliteCount && assigned < validCandidates.Count; i++)
-            {
                 validCandidates[assigned++].Initialize(ChapterNodeType.EliteEnemy);
-            }
-            // Merchants
+
             for (int i = 0; i < merchantCount && assigned < validCandidates.Count; i++)
-            {
                 validCandidates[assigned++].Initialize(ChapterNodeType.Merchant);
-            }
-            // Mystery
+
             for (int i = 0; i < mysteryCount && assigned < validCandidates.Count; i++)
-            {
                 validCandidates[assigned++].Initialize(ChapterNodeType.Mystery);
-            }
         }
 
         // =========================================================
-        // 2. Player Logic
+        // State Management
+        // =========================================================
+
+        public void SaveMapState()
+        {
+            // Gather cleared nodes
+            List<HexCoords> cleared = new List<HexCoords>();
+            foreach (var kvp in _nodes)
+            {
+                if (kvp.Value.isCleared) cleared.Add(kvp.Key);
+            }
+
+            // Current player position (or target if moving, but usually called before load)
+            HexCoords playerPos = _playerUnit != null ? _playerUnit.Coords : default;
+
+            MapRuntimeData.Save(_currentSeed, playerPos, _currentTideRow, _playerMoveCount, cleared);
+        }
+
+        // =========================================================
+        // Player & Gameplay
         // =========================================================
 
         void InitializePlayer()
         {
-            // Find player unit
             var units = FindObjectsByType<Unit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var u in units)
             {
-                if (u.GetComponent<FactionMembership>()?.side == Game.Core.Side.Player)
+                if (u.GetComponent<Game.Core.FactionMembership>()?.side == Game.Core.Side.Player)
                 {
                     _playerUnit = u;
                     break;
@@ -185,35 +207,42 @@ namespace Game.World
 
             if (_playerUnit != null)
             {
-                // Subscribe to movement
                 var mover = _playerUnit.GetComponent<UnitMover>();
-                if (mover != null)
-                {
-                    mover.OnMoveFinished += HandlePlayerMove;
-                }
+                if (mover != null) mover.OnMoveFinished += HandlePlayerMove;
 
-                // Place at Start
-                var startNode = _nodes.Values.FirstOrDefault(n => n.type == ChapterNodeType.Start);
-                if (startNode != null)
+                // Position Player
+                if (MapRuntimeData.HasData)
                 {
-                    _playerUnit.WarpTo(startNode.GetComponent<HexCell>().Coords);
+                    // Restore position
+                    _playerUnit.WarpTo(MapRuntimeData.PlayerPosition);
+                }
+                else
+                {
+                    // Start position
+                    var startNode = _nodes.Values.FirstOrDefault(n => n.type == ChapterNodeType.Start);
+                    if (startNode != null) _playerUnit.WarpTo(startNode.GetComponent<HexCell>().Coords);
                 }
             }
         }
 
         void HandlePlayerMove(HexCoords from, HexCoords to)
         {
-            // 1. Interaction logic
+            // 1. Save current position immediately so we don't lose it if we crash/reload
+            MapRuntimeData.PlayerPosition = to;
+
+            // 2. Interaction
             if (_nodes.TryGetValue(to, out var node))
             {
                 if (!node.isCleared)
                 {
-                    node.Interact(); // Trigger encounter, etc.
-                    // Note: Actual Scene loading would happen inside Node.Interact or via an event
+                    // We DO NOT auto-interact here for Battles anymore, 
+                    // because we need to Save BEFORE scene load.
+                    // ChapterNode.Interact() handles the flow.
+                    node.Interact();
                 }
             }
 
-            // 2. Tide Progression Logic
+            // 3. Tide Logic
             _playerMoveCount++;
             if (_playerMoveCount % movesPerTideStep == 0)
             {
@@ -221,19 +250,10 @@ namespace Game.World
             }
         }
 
-        // =========================================================
-        // 3. Tide System
-        // =========================================================
-
         IEnumerator RaiseTideRoutine()
         {
             yield return new WaitForSeconds(tideAnimationDelay);
-
-            // Rise by 1 row
             _currentTideRow++;
-
-            Debug.Log($"[ChapterMap] Tide Rising! Now covering Row {_currentTideRow}");
-
             UpdateTideVisuals();
             CheckPlayerTrapped();
         }
@@ -242,17 +262,9 @@ namespace Game.World
         {
             foreach (var kvp in _nodes)
             {
-                HexCoords c = kvp.Key;
-                ChapterNode node = kvp.Value;
-                HexCell cell = node.GetComponent<HexCell>();
-
-                if (c.r <= _currentTideRow)
+                if (kvp.Key.r <= _currentTideRow)
                 {
-                    if (!cell.IsFlooded)
-                    {
-                        cell.SetFlooded(true);
-                        // Optional: Play particle effect here
-                    }
+                    kvp.Value.GetComponent<HexCell>().SetFlooded(true);
                 }
             }
         }
@@ -260,91 +272,42 @@ namespace Game.World
         void CheckPlayerTrapped()
         {
             if (_playerUnit == null) return;
-
-            HexCoords pCoords = _playerUnit.Coords;
-            var cell = _playerUnit.GetComponent<Unit>().gridComponent.GetComponent<BattleHexGrid>()
-                        .EnumerateTiles().FirstOrDefault(t => t.Coords.Equals(pCoords))?
-                        .GetComponent<HexCell>();
-
-            // 1. Immediate Death Check: Is player standing in tide?
-            if (cell != null && cell.IsFlooded)
-            {
-                Debug.LogWarning("[ChapterMap] Player caught by Tide! Punishing...");
-                PunishAndRespawnPlayer();
-                return;
-            }
-
-            // 2. Soft Lock Check: Is player surrounded by Tide/Obstacles?
-            // (For V1, let's just rely on the player realizing they are stuck, 
-            // or waiting for the tide to consume them).
+            var cell = _nodes.ContainsKey(_playerUnit.Coords) ? _nodes[_playerUnit.Coords].GetComponent<HexCell>() : null;
+            if (cell != null && cell.IsFlooded) PunishAndRespawnPlayer();
         }
 
         void PunishAndRespawnPlayer()
         {
-            // TODO: Apply damage to player HP (BattleUnit)
-
-            // Find nearest safe tile (Flood Fill BFS)
             HexCoords safeSpot = FindNearestSafeTile(_playerUnit.Coords);
-
-            if (safeSpot.Equals(_playerUnit.Coords))
-            {
-                // If we returned same coords, it means no safe spot found (Game Over?)
-                Debug.LogError("Game Over - No safe spots left!");
-            }
+            if (safeSpot.Equals(_playerUnit.Coords)) Debug.LogError("Game Over - Tide consumed all!");
             else
             {
-                Debug.Log($"Rescuing player to {safeSpot}");
+                Debug.Log($"[Tide] Rescuing player to {safeSpot}");
                 _playerUnit.WarpTo(safeSpot);
             }
         }
 
-        // =========================================================
-        // Helpers
-        // =========================================================
-
-        List<ChapterNode> GetNodesInRow(int r)
-        {
-            return _nodes.Values.Where(n => n.GetComponent<HexCell>().Coords.r == r).ToList();
-        }
+        List<ChapterNode> GetNodesInRow(int r) => _nodes.Values.Where(n => n.GetComponent<HexCell>().Coords.r == r).ToList();
 
         HexCoords GetCenterOfRow(List<ChapterNode> rowNodes)
         {
             if (rowNodes == null || rowNodes.Count == 0) return default;
-            // Sort by q
             rowNodes.Sort((a, b) => a.GetComponent<HexCell>().Coords.q.CompareTo(b.GetComponent<HexCell>().Coords.q));
             return rowNodes[rowNodes.Count / 2].GetComponent<HexCell>().Coords;
         }
 
         HexCoords FindNearestSafeTile(HexCoords origin)
         {
-            // BFS for nearest tile where IsFlooded == false
             Queue<HexCoords> q = new Queue<HexCoords>();
             HashSet<HexCoords> visited = new HashSet<HexCoords>();
-
-            q.Enqueue(origin);
-            visited.Add(origin);
-
+            q.Enqueue(origin); visited.Add(origin);
             while (q.Count > 0)
             {
                 HexCoords current = q.Dequeue();
-
-                if (_nodes.TryGetValue(current, out var node))
-                {
-                    if (!node.GetComponent<HexCell>().IsFlooded)
-                        return current;
-                }
-
-                foreach (var n in current.Neighbors())
-                {
-                    if (!visited.Contains(n) && _nodes.ContainsKey(n))
-                    {
-                        visited.Add(n);
-                        q.Enqueue(n);
-                    }
-                }
+                if (_nodes.TryGetValue(current, out var node) && !node.GetComponent<HexCell>().IsFlooded) return current;
+                foreach (var n in current.Neighbors()) if (!visited.Contains(n) && _nodes.ContainsKey(n)) { visited.Add(n); q.Enqueue(n); }
             }
-
-            return origin; // Failed
+            return origin;
         }
     }
 }

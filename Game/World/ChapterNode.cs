@@ -22,10 +22,11 @@ namespace Game.World
         public ChapterNodeType type = ChapterNodeType.NormalEnemy;
         public bool isCleared = false;
 
-        [Header("Visuals (Optional)")]
-        [Tooltip("Prefab to spawn on this tile to represent content (e.g. Skull Icon)")]
+        [Header("Content Integration")]
+        public EncounterNode specificEncounter;
+
+        [Header("Visuals")]
         public GameObject markerPrefab;
-        private GameObject _markerInstance;
 
         private HexCell _cell;
 
@@ -38,35 +39,70 @@ namespace Game.World
         {
             type = nodeType;
             isCleared = false;
-
-            // Setup specialized terrain logic if needed
-            // e.g., Boss node might be visually distinct
-            UpdateMarker();
         }
 
         public void SetCleared(bool cleared)
         {
             isCleared = cleared;
-            UpdateMarker();
-        }
-
-        void UpdateMarker()
-        {
-            if (_markerInstance != null) Destroy(_markerInstance);
-
-            // TODO: In Phase 3, we would instantiate specific icons here
-            // based on the 'type' enum.
-            // For now, simple debug logic or placeholder could go here.
+            // TODO: Update visual state (e.g. gray out icon)
         }
 
         public void Interact()
         {
             if (isCleared) return;
 
-            Debug.Log($"[ChapterNode] Interaction Triggered: {type}");
+            Debug.Log($"[ChapterNode] Interact: {type}");
 
-            // Logic for interaction will be handled by ChapterMapManager
-            // which listens to player arrival.
+            // ⭐ CRITICAL: Save Map State before leaving scene
+            if (ChapterMapManager.Instance != null)
+            {
+                // Note: We mark THIS node as cleared assuming player will win.
+                // If they lose/flee, we might handle that differently (e.g. reload save).
+                // For now, let's assume entry = cleared for non-battle nodes, 
+                // but for Battle nodes, we might want to clear it ONLY on return.
+
+                // Strategy: Mark it cleared in the *saved data* now? 
+                // Or let the BattleOutcomeUI mark it cleared in MapData upon Victory?
+                // Let's rely on BattleOutcomeUI or a "Return" handler to finalize the clear.
+                // But we must save the player position here.
+                ChapterMapManager.Instance.SaveMapState();
+            }
+
+            // Trigger Logic
+            if (specificEncounter != null)
+            {
+                specificEncounter.StartEncounter();
+                return;
+            }
+
+            switch (type)
+            {
+                case ChapterNodeType.NormalEnemy:
+                case ChapterNodeType.EliteEnemy:
+                case ChapterNodeType.Boss:
+                    TriggerGenericBattle();
+                    break;
+
+                case ChapterNodeType.Merchant:
+                    Debug.Log("Open Merchant UI");
+                    break;
+
+                case ChapterNodeType.Treasure:
+                    Debug.Log("Open Treasure Chest");
+                    SetCleared(true);
+                    // Update save immediately for non-scene interactions
+                    ChapterMapManager.Instance.SaveMapState();
+                    break;
+            }
+        }
+
+        void TriggerGenericBattle()
+        {
+            var encounter = GetComponent<EncounterNode>();
+            if (encounter == null) encounter = gameObject.AddComponent<EncounterNode>();
+
+            // Note: EncounterNode.StartEncounter will load the Battle Scene
+            encounter.StartEncounter();
         }
     }
 }

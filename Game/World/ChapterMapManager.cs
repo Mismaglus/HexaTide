@@ -132,6 +132,15 @@ namespace Game.World
                 if (tile.Coords.r < _minRow) _minRow = tile.Coords.r;
                 if (tile.Coords.r > _maxRow) _maxRow = tile.Coords.r;
 
+                // ⭐ 1. Force Map Visibility Logic
+                // Get the cell and force it to be visible immediately
+                var cell = tile.GetComponent<HexCell>();
+                if (cell != null)
+                {
+                    cell.SetFogStatus(FogStatus.Visible);
+                }
+
+                // ⭐ 2. Setup Node Logic
                 var node = tile.GetComponent<ChapterNode>();
                 if (node == null) node = tile.gameObject.AddComponent<ChapterNode>();
 

@@ -212,13 +212,16 @@ namespace Game.UI
             ClaimRewards();
             BattleContext.Reset();
 
-            // ⭐ NEW: Mark current map node as cleared in persistence
+            // ⭐ 1. Mark the current node as cleared in our persistent data
             if (Game.World.MapRuntimeData.HasData)
             {
+                // We clear the node where the player currently stands
                 Game.World.MapRuntimeData.ClearedNodes.Add(Game.World.MapRuntimeData.PlayerPosition);
+                Debug.Log($"[BattleOutcome] Node at {Game.World.MapRuntimeData.PlayerPosition} marked as cleared.");
             }
 
-            // Return to Map
+            // ⭐ 2. Return to the Map Scene
+            // Make sure "MapScene" is added to your Build Settings!
             SceneManager.LoadScene("MapScene");
         }
 

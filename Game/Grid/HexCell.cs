@@ -40,7 +40,8 @@ namespace Game.Grid
         public FogStatus fogStatus = FogStatus.Unknown;
 
         [Header("Colors (Config)")]
-        [SerializeField] private Color colorVisible = Color.white;
+        // ⭐ CHANGED: Default visible color is now a pleasant Map Grey instead of White
+        [SerializeField] private Color colorVisible = new Color(0.4f, 0.45f, 0.5f, 1f);
         [SerializeField] private Color colorGhost = new Color(0.7f, 0.7f, 0.7f, 1f);
         [SerializeField] private Color colorSensed = new Color(0.6f, 0.4f, 0.4f, 1f);
         [SerializeField] private Color colorUnknown = new Color(0.5f, 0.5f, 0.5f, 0.1f);

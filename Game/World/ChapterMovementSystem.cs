@@ -1,0 +1,209 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+using Core.Hex;
+using Game.Grid;
+using Game.Units;
+using Game.Battle; // For BattleHexGrid ref
+using System.Collections.Generic;
+using Game.Common;
+
+namespace Game.World
+{
+    /// <summary>
+    /// Handles player input and movement specifically for the Chapter Map.
+    /// Decoupled from BattleRules. Uses ChapterPathfinder.
+    /// </summary>
+    public class ChapterMovementSystem : MonoBehaviour
+    {
+        [Header("References")]
+        public BattleHexGrid grid;
+        public HexHighlighter highlighter;
+
+        [Header("Settings")]
+        public LayerMask terrainLayer = ~0;
+        public bool doubleClickToConfirm = true;
+
+        [Header("Visuals")]
+        public GameObject ghostPrefab; // Optional: Semi-transparent player model
+        private GameObject _activeGhost;
+
+        // State
+        private Camera _cam;
+        private Unit _playerUnit;
+        private UnitMover _playerMover;
+
+        private HexCoords? _hoveredCoords;
+        private HexCoords? _plannedDestination; // Where we WANT to go (awaiting confirmation)
+        private List<HexCoords> _currentPath;
+
+        void Start()
+        {
+            _cam = Camera.main;
+            if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
+            if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
+
+            FindPlayer();
+        }
+
+        void FindPlayer()
+        {
+            // Find unit tagged as Player Side
+            var units = FindObjectsByType<Game.Core.FactionMembership>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (var f in units)
+            {
+                if (f.side == Game.Core.Side.Player)
+                {
+                    _playerUnit = f.GetComponent<Unit>();
+                    _playerMover = f.GetComponent<UnitMover>();
+                    break;
+                }
+            }
+        }
+
+        void Update()
+        {
+            // Safety checks
+            if (_playerUnit == null) { FindPlayer(); return; }
+            if (_playerMover != null && _playerMover.IsMoving) return; // Block input while moving
+
+            HandleInput();
+        }
+
+        void HandleInput()
+        {
+            // 1. Cancel Logic (Right Click)
+            if (Mouse.current.rightButton.wasPressedThisFrame)
+            {
+                ClearPlan();
+                return;
+            }
+
+            // 2. Raycast Logic
+            if (Mouse.current == null) return;
+            Vector2 mousePos = Mouse.current.position.ReadValue();
+
+            if (HexRaycaster.TryPick(_cam, mousePos, out var go, out var tag, (int)terrainLayer))
+            {
+                // On Hover Change
+                if (!_hoveredCoords.HasValue || !_hoveredCoords.Value.Equals(tag.Coords))
+                {
+                    _hoveredCoords = tag.Coords;
+                    OnHoverTile(_hoveredCoords.Value);
+                }
+
+                // On Click
+                if (Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    OnLeftClick(_hoveredCoords.Value);
+                }
+            }
+            else
+            {
+                // Mouse off grid
+                if (_hoveredCoords.HasValue)
+                {
+                    _hoveredCoords = null;
+                    if (_plannedDestination == null) highlighter.ClearAll(); // Only clear if not planning
+                }
+            }
+        }
+
+        // --- Logic ---
+
+        void OnHoverTile(HexCoords tile)
+        {
+            // If we have a plan locked in, don't update highlights based on hover
+            if (_plannedDestination.HasValue) return;
+
+            highlighter.ClearAll();
+            highlighter.SetHover(tile);
+        }
+
+        void OnLeftClick(HexCoords target)
+        {
+            // Case A: We are already planning a move to THIS tile -> Confirm execution
+            if (_plannedDestination.HasValue && _plannedDestination.Value.Equals(target))
+            {
+                ExecuteMove();
+                return;
+            }
+
+            // Case B: We are planning a move to a DIFFERENT tile -> Change plan
+            // Case C: No plan yet -> Start planning
+
+            if (doubleClickToConfirm)
+            {
+                PlanMove(target);
+            }
+            else
+            {
+                // If double click is disabled, just move immediately
+                PlanMove(target);
+                if (_currentPath != null && _currentPath.Count > 0) ExecuteMove();
+            }
+        }
+
+        void PlanMove(HexCoords target)
+        {
+            ClearPlan(); // Remove old ghosts/lines
+
+            if (_playerUnit.Coords.Equals(target)) return; // Clicked on self
+
+            // Calculate Path using the new simple Pathfinder
+            var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
+
+            if (path == null || path.Count == 0)
+            {
+                Debug.Log("Path blocked or invalid.");
+                // TODO: Play 'Cannot Move' sound
+                return;
+            }
+
+            // Valid Plan
+            _plannedDestination = target;
+            _currentPath = path;
+
+            // Draw visuals
+            if (highlighter)
+            {
+                highlighter.ClearAll();
+                highlighter.ApplyRange(path); // Lights up the road
+            }
+
+            if (ghostPrefab != null && grid != null)
+            {
+                Vector3 pos = grid.GetTileWorldPosition(target);
+                _activeGhost = Instantiate(ghostPrefab, pos, Quaternion.identity);
+            }
+
+            Debug.Log($"[Map] Plan set for {target}. Click again to go.");
+        }
+
+        void ExecuteMove()
+        {
+            if (_currentPath == null || _currentPath.Count == 0) return;
+
+            // Cleanup visuals before moving
+            if (_activeGhost != null) Destroy(_activeGhost);
+            highlighter.ClearAll();
+            _plannedDestination = null;
+
+            // Send to Mover
+            _playerMover.FollowPath(_currentPath, OnMoveFinished);
+        }
+
+        void ClearPlan()
+        {
+            _plannedDestination = null;
+            _currentPath = null;
+            if (_activeGhost != null) Destroy(_activeGhost);
+            highlighter.ClearAll();
+        }
+
+        void OnMoveFinished()
+        {
+            // UnitMover has finished animating
+            // ChapterMapManager listens to UnitMover events to trigger encounters/tide
+        }
+    }
+}

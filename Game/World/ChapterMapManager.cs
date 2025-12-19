@@ -318,5 +318,14 @@ namespace Game.World
             }
             return origin;
         }
+
+        public ChapterNode GetNodeAt(HexCoords coords)
+        {
+            if (_nodes.TryGetValue(coords, out var node))
+            {
+                return node;
+            }
+            return null;
+        }
     }
 }

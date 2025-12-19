@@ -40,8 +40,8 @@ namespace Game.Grid
         public FogStatus fogStatus = FogStatus.Unknown;
 
         [Header("Colors (Config)")]
-        // ⭐ CHANGED: Default visible color is now a pleasant Map Grey instead of White
-        [SerializeField] private Color colorVisible = new Color(0.4f, 0.45f, 0.5f, 1f);
+        // Default to White (Neutral) so standard logic isn't messed up
+        [SerializeField] private Color colorVisible = Color.white;
         [SerializeField] private Color colorGhost = new Color(0.7f, 0.7f, 0.7f, 1f);
         [SerializeField] private Color colorSensed = new Color(0.6f, 0.4f, 0.4f, 1f);
         [SerializeField] private Color colorUnknown = new Color(0.5f, 0.5f, 0.5f, 0.1f);
@@ -101,8 +101,6 @@ namespace Game.Grid
         {
             if (_isFlooded == state) return;
             _isFlooded = state;
-
-            // Flooding forces an immediate visual update
             RefreshFogVisuals();
         }
 
@@ -117,28 +115,49 @@ namespace Game.Grid
         {
             if (_meshRenderer == null) return;
 
+            // 1. Start clean: Remove all overrides so the default Material shows through
             _meshRenderer.GetPropertyBlock(_mpb);
+            _mpb.Clear();
 
+            bool applyTint = false;
             Color targetColor = Color.white;
 
-            // Tide overrides fog colors
+            // 2. Determine if we need to apply a tint (Tide OR Fog)
             if (_isFlooded)
             {
+                applyTint = true;
                 targetColor = colorFlooded;
             }
             else
             {
                 switch (fogStatus)
                 {
-                    case FogStatus.Visible: targetColor = colorVisible; break;
-                    case FogStatus.Ghost: targetColor = colorGhost; break;
-                    case FogStatus.Sensed: targetColor = colorSensed; break;
-                    case FogStatus.Unknown: targetColor = colorUnknown; break;
+                    case FogStatus.Visible:
+                        // ⭐ CRITICAL: Do NOT apply tint. Let the material render naturally.
+                        applyTint = false;
+                        break;
+
+                    case FogStatus.Ghost:
+                        applyTint = true;
+                        targetColor = colorGhost;
+                        break;
+                    case FogStatus.Sensed:
+                        applyTint = true;
+                        targetColor = colorSensed;
+                        break;
+                    case FogStatus.Unknown:
+                        applyTint = true;
+                        targetColor = colorUnknown;
+                        break;
                 }
             }
 
-            _mpb.SetColor(ColorPropID, targetColor);
-            _mpb.SetColor(TintPropID, targetColor);
+            // 3. Apply override only if necessary
+            if (applyTint)
+            {
+                _mpb.SetColor(ColorPropID, targetColor);
+                _mpb.SetColor(TintPropID, targetColor);
+            }
 
             _meshRenderer.SetPropertyBlock(_mpb);
         }

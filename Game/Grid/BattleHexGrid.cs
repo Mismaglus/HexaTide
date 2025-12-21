@@ -12,6 +12,9 @@ namespace Game.Battle
     {
         [Header("Grid Configuration")]
         [SerializeField] private GridRecipe _recipe;
+        [Tooltip("Optional: If set, this prefab will be instantiated for each cell. Use this to configure HexCell colors/defaults.")]
+        [SerializeField] private HexCell _cellPrefab;
+
         [SerializeField, HideInInspector] private uint _version;
 
         public uint Version
@@ -38,6 +41,9 @@ namespace Game.Battle
         Material _borderMat;
         bool _dirty;
 
+        // Runtime Cell Lookup
+        private Dictionary<HexCoords, HexCell> _cellMap = new Dictionary<HexCoords, HexCell>();
+
         // Serialized to keep the map centered in the scene view
         [SerializeField, HideInInspector] private Vector3 _serializedCenterOffset;
         public Vector3 CenterOffset
@@ -49,6 +55,17 @@ namespace Game.Battle
         public IEnumerable<TileTag> EnumerateTiles()
         {
             return GetComponentsInChildren<TileTag>(true);
+        }
+
+        public HexCell GetCell(HexCoords coords)
+        {
+            if (_cellMap.TryGetValue(coords, out var cell)) return cell;
+            return null;
+        }
+
+        public bool TryGetCell(HexCoords coords, out HexCell cell)
+        {
+            return _cellMap.TryGetValue(coords, out cell);
         }
 
         void OnEnable() { _dirty = true; }
@@ -78,6 +95,7 @@ namespace Game.Battle
 
         void ClearChildren()
         {
+            _cellMap.Clear();
             for (int i = transform.childCount - 1; i >= 0; i--)
             {
                 var ch = transform.GetChild(i).gameObject;
@@ -123,25 +141,61 @@ namespace Game.Battle
                     if (!mask[q, r]) continue;
 
                     Vector3 pos = HexMetrics.GridToWorld(q, r, recipe.outerRadius, recipe.useOddROffset) - CenterOffset;
+                    GameObject go;
+                    HexCell cell;
 
-                    var go = new GameObject($"{CHILD_PREFIX_TILES}{r}_c{q}");
-                    go.transform.SetParent(transform, false);
-                    go.transform.localPosition = pos;
+                    // Instantiate Prefab OR Create New
+                    if (_cellPrefab != null)
+                    {
+#if UNITY_EDITOR
+                        if (!Application.isPlaying)
+                            go = (GameObject)UnityEditor.PrefabUtility.InstantiatePrefab(_cellPrefab.gameObject, transform);
+                        else
+                            go = Instantiate(_cellPrefab.gameObject, transform);
+#else
+                        go = Instantiate(_cellPrefab.gameObject, transform);
+#endif
+                        go.transform.localPosition = pos;
+                        cell = go.GetComponent<HexCell>();
+                    }
+                    else
+                    {
+                        go = new GameObject($"{CHILD_PREFIX_TILES}{r}_c{q}");
+                        go.transform.SetParent(transform, false);
+                        go.transform.localPosition = pos;
+                        cell = go.AddComponent<HexCell>();
+                    }
 
-                    var tile = go.AddComponent<HexTile>();
+                    go.name = $"{CHILD_PREFIX_TILES}{r}_c{q}";
+
+                    // Setup HexTile (Visuals)
+                    var tile = go.GetComponent<HexTile>();
+                    if (!tile) tile = go.AddComponent<HexTile>();
                     tile.outerRadius = recipe.outerRadius;
                     tile.thickness = recipe.thickness;
 
+                    // Set Material if not already set by prefab/renderer
                     var mr = go.GetComponent<MeshRenderer>();
-                    mr.sharedMaterial = _sharedMat;
+                    if (mr && _sharedMat != null)
+                    {
+                        // Only override if it looks like a default/generated material context, 
+                        // or strict enforcement is desired. For now, we apply sharedMat if valid.
+                        mr.sharedMaterial = _sharedMat;
+                    }
 
                     tile.BuildImmediate();
 
-                    var tag = go.AddComponent<TileTag>();
+                    // Setup TileTag (Data)
+                    var tag = go.GetComponent<TileTag>();
+                    if (!tag) tag = go.AddComponent<TileTag>();
                     tag.Set(q, r);
 
-                    // Add HexCell for logic
-                    var cell = go.AddComponent<HexCell>();
+                    // Link Cell to Tag & Map
+                    if (cell)
+                    {
+                        cell.tileTag = tag; // Explicit injection
+                        _cellMap[new HexCoords(q, r)] = cell;
+                    }
                 }
             }
 
@@ -203,17 +257,11 @@ namespace Game.Battle
             if (rcp.shape == GridShape.Hexagon)
             {
                 // Hexagon Generation:
-                // Create a bounding box large enough (Diameter approx 2*Radius + 1)
-                // Use offset coords, iterate, check distance from "Center Hex"
                 int size = rcp.radius * 2 + 1;
-                // Add padding for safety
                 int w = size + 2;
                 int h = size + 2;
 
                 mask = new HexMask(w, h);
-
-                // Center roughly in the middle of the mask array
-                // For offset coordinates, (Radius, Radius) is roughly center
                 HexCoords centerHex = new HexCoords(rcp.radius + 1, rcp.radius + 1);
 
                 for (int r = 0; r < h; r++)
@@ -231,8 +279,6 @@ namespace Game.Battle
             else // Rectangle
             {
                 mask = HexMask.Filled(rcp.width, rcp.height);
-
-                // Only apply column holes in rectangle mode for now (or update logic if needed)
                 if (rcp.emptyColumns != null)
                 {
                     foreach (var col in rcp.emptyColumns)
@@ -240,7 +286,6 @@ namespace Game.Battle
                 }
             }
 
-            // Apply random holes to both shapes
             if (rcp.enableRandomHoles && rcp.holeChance > 0f)
                 mask.RandomHoles(rcp.holeChance, rcp.randomSeed);
 
@@ -262,7 +307,7 @@ namespace Game.Battle
                 h = h * 31 + (int)recipe.shape;
                 h = h * 31 + recipe.width;
                 h = h * 31 + recipe.height;
-                h = h * 31 + recipe.radius; // Track radius
+                h = h * 31 + recipe.radius;
                 h = h * 31 + recipe.useOddROffset.GetHashCode();
                 h = h * 31 + recipe.borderMode.GetHashCode();
                 h = h * 31 + recipe.outerRadius.GetHashCode();

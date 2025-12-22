@@ -13,8 +13,9 @@ namespace Game.Common
         public Game.Battle.BattleHexGrid grid;
 
         [Header("Standard Colors")]
-        public Color hoverColor = new Color(0.95f, 0.95f, 0.25f, 0.5f);
-        public Color selectedColor = new Color(0.25f, 0.8f, 1.0f, 0.5f);
+        // Fix: Use high alpha (1.0) and light colors for tinting to avoid making the mesh transparent
+        public Color hoverColor = new Color(1.0f, 1.0f, 0.8f, 1.0f); // Light Yellow Tint
+        public Color selectedColor = new Color(0.6f, 1.0f, 0.6f, 1.0f); // Light Green Tint (Requested)
 
         [Header("Combat Colors")]
         public Color rangeColor = new Color(0.0f, 1.0f, 0.4f, 0.3f);
@@ -30,6 +31,7 @@ namespace Game.Common
         public Color rippleColor = new Color(1f, 0.2f, 0.2f, 1f); // 波纹红 (建议 Alpha=1)
 
         [Header("Fog Colors")]
+        public bool ignoreFog = false;
         public Color fogUnknownColor = Color.black;
         public Color fogGhostColor = new Color(0.5f, 0.5f, 0.6f, 1f);
 
@@ -285,6 +287,8 @@ namespace Game.Common
 
             FogStatus fog = FogStatus.Visible;
             if (slot.cell != null) fog = slot.cell.fogStatus;
+
+            if (ignoreFog) fog = FogStatus.Visible;
 
             bool isRipple = _activeRipples.ContainsKey(coord);
             bool inImpact = _impact.Contains(coord);

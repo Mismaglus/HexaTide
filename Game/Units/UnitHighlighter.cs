@@ -133,4 +133,13 @@ public class UnitHighlighter : MonoBehaviour
             mat.SetFloat(WidID, 0f);
         }
     }
+
+    public void SetVisible(bool visible)
+    {
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        foreach (var r in renderers)
+        {
+            r.enabled = visible;
+        }
+    }
 }

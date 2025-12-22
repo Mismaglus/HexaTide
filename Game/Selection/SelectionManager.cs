@@ -30,6 +30,9 @@ namespace Game.Battle
         [Header("Visuals Manager")]
         public GridOutlineManager outlineManager;
         public BattleCursor gridCursor;
+        [Tooltip("Prefab to spawn on the selected tile/unit (Ghost)")]
+        public GameObject selectionGhostPrefab;
+        private GameObject _selectionGhostInstance;
 
         [Header("Range Settings")]
         public RangeMode rangeMode = RangeMode.None;
@@ -160,6 +163,7 @@ namespace Game.Battle
                 input.OnTileClicked += OnTileClicked;
                 input.OnHoverChanged += OnHoverChanged;
             }
+            OnSelectedUnitChanged += UpdateGhost;
         }
         void OnDisable()
         {
@@ -167,6 +171,28 @@ namespace Game.Battle
             {
                 input.OnTileClicked -= OnTileClicked;
                 input.OnHoverChanged -= OnHoverChanged;
+            }
+            OnSelectedUnitChanged -= UpdateGhost;
+            if (_selectionGhostInstance) Destroy(_selectionGhostInstance);
+        }
+
+        void UpdateGhost(Unit u)
+        {
+            if (u != null)
+            {
+                if (!_selectionGhostInstance && selectionGhostPrefab)
+                {
+                    _selectionGhostInstance = Instantiate(selectionGhostPrefab);
+                }
+                if (_selectionGhostInstance)
+                {
+                    _selectionGhostInstance.SetActive(true);
+                    if (grid) _selectionGhostInstance.transform.position = grid.GetTileWorldPosition(u.Coords);
+                }
+            }
+            else
+            {
+                if (_selectionGhostInstance) _selectionGhostInstance.SetActive(false);
             }
         }
 
@@ -394,7 +420,13 @@ namespace Game.Battle
         void OnUnitMoveFinished(Unit u, HexCoords from, HexCoords to)
         {
             RemoveUnitMapping(u); _units[to] = u;
-            if (SelectedUnit == u) { _selected = to; highlighter.SetSelected(to); RecalcRange(); }
+            if (SelectedUnit == u)
+            {
+                _selected = to;
+                highlighter.SetSelected(to);
+                RecalcRange();
+                UpdateGhost(u);
+            }
         }
 
         void RecalcRange()

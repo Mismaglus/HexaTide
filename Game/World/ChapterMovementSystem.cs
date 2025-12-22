@@ -18,6 +18,7 @@ namespace Game.World
         [Header("References")]
         public BattleHexGrid grid;
         public HexHighlighter highlighter;
+        public ChapterOutlineManager outlineManager; // Changed to ChapterOutlineManager
 
         [Header("Settings")]
         public LayerMask terrainLayer = ~0;
@@ -41,6 +42,7 @@ namespace Game.World
             _cam = Camera.main;
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
+            if (!outlineManager) outlineManager = FindFirstObjectByType<ChapterOutlineManager>();
 
             FindPlayer();
         }
@@ -103,7 +105,18 @@ namespace Game.World
                 if (_hoveredCoords.HasValue)
                 {
                     _hoveredCoords = null;
-                    if (_plannedDestination == null) highlighter.ClearAll(); // Only clear if not planning
+                    if (_plannedDestination == null)
+                    {
+                        highlighter.ClearAll(); // Only clear if not planning
+                        if (outlineManager) outlineManager.Hide();
+
+                        // Clear Unit Highlight
+                        if (_playerUnit != null)
+                        {
+                            var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                            if (uh) uh.SetHover(false);
+                        }
+                    }
                 }
             }
         }
@@ -117,6 +130,34 @@ namespace Game.World
 
             highlighter.ClearAll();
             highlighter.SetHover(tile);
+
+            // Show outline if available
+            if (outlineManager)
+            {
+                outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
+            }
+
+            // Unit Highlight Logic
+            if (ChapterMapManager.Instance != null)
+            {
+                // Check if there is a unit at this tile (Player)
+                // In Chapter Map, usually only Player moves, but maybe we hover over enemies?
+                // For now, let's just check if we hover over the player
+                if (_playerUnit != null && _playerUnit.Coords.Equals(tile))
+                {
+                    var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                    if (uh) uh.SetHover(true);
+                }
+                else
+                {
+                    // Clear player highlight if not hovering
+                    if (_playerUnit != null)
+                    {
+                        var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                        if (uh) uh.SetHover(false);
+                    }
+                }
+            }
         }
 
         void OnLeftClick(HexCoords target)
@@ -149,12 +190,41 @@ namespace Game.World
 
             if (_playerUnit.Coords.Equals(target)) return; // Clicked on self
 
+            // Debugging Pathfinding
+            if (ChapterMapManager.Instance == null) { Debug.LogError("ChapterMapManager missing!"); return; }
+            var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
+            var endNode = ChapterMapManager.Instance.GetNodeAt(target);
+
+            if (startNode == null)
+            {
+                Debug.LogError($"Start Node {_playerUnit.Coords} not found in MapManager!");
+                ChapterMapManager.Instance.DebugDumpNodes();
+            }
+            if (endNode == null)
+            {
+                Debug.LogError($"End Node {target} not found in MapManager!");
+                ChapterMapManager.Instance.DebugDumpNodes();
+                // Try fallback lookup in case comparer mismatch
+                endNode = ChapterMapManager.Instance.GetNodeAt(target);
+                if (endNode != null)
+                {
+                    Debug.LogWarning($"[ChapterMovementSystem] Fallback found node at {target} after initial miss.");
+                }
+            }
+
+            if (startNode == null || endNode == null)
+            {
+                Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start({startNode != null}) or end({endNode != null}) is missing. Target: {target}");
+                Debug.LogWarning("[ChapterMovementSystem] Aborting PlanMove because start or end node is missing.");
+                return;
+            }
+
             // Calculate Path using the new simple Pathfinder
             var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
 
             if (path == null || path.Count == 0)
             {
-                Debug.Log("Path blocked or invalid.");
+                Debug.Log($"Path blocked or invalid. Start: {_playerUnit.Coords}, End: {target}");
                 // TODO: Play 'Cannot Move' sound
                 return;
             }
@@ -198,6 +268,7 @@ namespace Game.World
             _currentPath = null;
             if (_activeGhost != null) Destroy(_activeGhost);
             highlighter.ClearAll();
+            if (outlineManager) outlineManager.Hide();
         }
 
         void OnMoveFinished()

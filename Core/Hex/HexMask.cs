@@ -11,6 +11,8 @@ namespace Core.Hex
         public int Width { get; }
         public int Height { get; }
 
+        public bool[,] GetRawBits() => _bits;
+
         public HexMask(int width, int height)
         {
             Width = width; Height = height;
@@ -22,6 +24,11 @@ namespace Core.Hex
             var m = new HexMask(width, height);
             m.FillAll();
             return m;
+        }
+
+        public bool InBounds(int q, int r)
+        {
+            return q >= 0 && q < Width && r >= 0 && r < Height;
         }
 
         public bool this[int q, int r]
@@ -57,7 +64,6 @@ namespace Core.Hex
                     _bits[q, r] = true;
         }
 
-        public bool InBounds(int q, int r) => q >= 0 && q < Width && r >= 0 && r < Height;
         public int CountTrue()
         {
             int c = 0;

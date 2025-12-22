@@ -24,6 +24,7 @@ namespace Game.Battle
         private BattleStateMachine _battleSM;
 
         [Header("Config")]
+        public bool enableFog = true; // If false, all tiles are visible
         // [Tooltip("感知范围加成：基础视野 + 此数值 = 波纹侦测范围")]
         // public int senseRangeBonus = 2; // 已移除，改用 UnitAttributes
 
@@ -153,6 +154,26 @@ namespace Game.Battle
         public void RefreshFog()
         {
             if (grid == null) return;
+
+            if (!enableFog)
+            {
+                // If fog is disabled, make everything visible
+                foreach (var tile in grid.EnumerateTiles())
+                {
+                    var cell = tile.GetComponent<HexCell>();
+                    if (cell) cell.SetFogStatus(FogStatus.Visible);
+                }
+                // Also update unit visibility so they are all shown
+                foreach (var u in _allUnitsCache)
+                {
+                    if (u != null && u.UnitRef != null)
+                    {
+                        var vis = u.GetComponentInChildren<UnitHighlighter>(true);
+                        if (vis) vis.SetVisible(true);
+                    }
+                }
+                return;
+            }
 
             _visibleTiles.Clear();
 
@@ -336,7 +357,11 @@ namespace Game.Battle
             foreach (var c in canvases) c.enabled = visible;
         }
 
-        public bool IsTileVisible(HexCoords c) => _visibleTiles.Contains(c);
+        public bool IsTileVisible(HexCoords c)
+        {
+            if (!enableFog) return true;
+            return _visibleTiles.Contains(c);
+        }
         public bool IsTileExplored(HexCoords c) => _visibleTiles.Contains(c) || _visitedTiles.Contains(c);
     }
 }

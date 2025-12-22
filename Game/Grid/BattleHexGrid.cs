@@ -42,7 +42,13 @@ namespace Game.Battle
         bool _dirty;
 
         // Runtime Cell Lookup
-        private Dictionary<HexCoords, HexCell> _cellMap = new Dictionary<HexCoords, HexCell>();
+        private sealed class HexCoordsComparer : IEqualityComparer<HexCoords>
+        {
+            public bool Equals(HexCoords a, HexCoords b) => a.q == b.q && a.r == b.r;
+            public int GetHashCode(HexCoords h) => (h.q * 397) ^ h.r;
+        }
+
+        private Dictionary<HexCoords, HexCell> _cellMap = new Dictionary<HexCoords, HexCell>(new HexCoordsComparer());
 
         // Serialized to keep the map centered in the scene view
         [SerializeField, HideInInspector] private Vector3 _serializedCenterOffset;
@@ -96,16 +102,29 @@ namespace Game.Battle
         void ClearChildren()
         {
             _cellMap.Clear();
-            for (int i = transform.childCount - 1; i >= 0; i--)
+
+            // Move all children to a temporary "Trash" object to ensure they are immediately removed from this hierarchy
+            GameObject trash = new GameObject("Trash_PendingDestroy");
+            trash.SetActive(false); // Disable the trash container immediately
+
+            int childCount = transform.childCount;
+            // Loop backwards is safer when modifying hierarchy, though we are moving all
+            for (int i = childCount - 1; i >= 0; i--)
             {
-                var ch = transform.GetChild(i).gameObject;
-#if UNITY_EDITOR
-                if (!Application.isPlaying) DestroyImmediate(ch);
-                else Destroy(ch);
-#else
-                Destroy(ch);
-#endif
+                Transform child = transform.GetChild(i);
+                child.SetParent(trash.transform, false);
             }
+
+            // Now destroy the trash
+#if UNITY_EDITOR
+            if (!Application.isPlaying) DestroyImmediate(trash);
+            else Destroy(trash);
+#else
+            Destroy(trash);
+#endif
+
+            // Ensure nothing remains parented here (safety for delayed destroy)
+            transform.DetachChildren();
         }
 
         public void Rebuild()
@@ -167,6 +186,11 @@ namespace Game.Battle
                     }
 
                     go.name = $"{CHILD_PREFIX_TILES}{r}_c{q}";
+
+                    // Ensure layer is set to Default or whatever is needed for Raycast
+                    // If the prefab has a specific layer, this might overwrite it, but we need to ensure it's hit by raycast
+                    // Assuming layer 0 (Default) or the layer of the grid object
+                    go.layer = gameObject.layer;
 
                     // Setup HexTile (Visuals)
                     var tile = go.GetComponent<HexTile>();

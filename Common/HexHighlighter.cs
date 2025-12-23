@@ -35,6 +35,11 @@ namespace Game.Common
         public Color fogUnknownColor = Color.black;
         public Color fogGhostColor = new Color(0.5f, 0.5f, 0.6f, 1f);
 
+        [Header("Path Visuals")]
+        public GameObject targetCursorPrefab;
+        public GameObject pathNodePrefab;
+        public GameObject costLabelPrefab;
+
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
         [Range(0.1f, 4f)] public float selectedIntensity = 1.0f;
@@ -77,6 +82,12 @@ namespace Game.Common
         MaterialPropertyBlock _mpb;
         uint _lastGridVersion;
         bool _warned;
+
+        // Visuals State
+        private GameObject _currentCursor;
+        private GameObject _currentLabel;
+        private List<GameObject> _activePathNodes = new List<GameObject>();
+        private Queue<GameObject> _pathNodePool = new Queue<GameObject>();
 
         void Awake() { if (_mpb == null) _mpb = new MaterialPropertyBlock(); }
 
@@ -264,6 +275,8 @@ namespace Game.Common
             foreach (var x in _moveFree) t.Add(x); foreach (var x in _moveCost) t.Add(x);
             _hover = null; _selected = null; _range.Clear(); _impact.Clear(); _enemyDanger.Clear(); _moveFree.Clear(); _moveCost.Clear(); _activeRipples.Clear();
             foreach (var x in t) ClearPaint(x);
+
+            ClearVisuals(); // Also clear new visuals
         }
 
         void revertPaintHelper(HexCoords? c) { if (c.HasValue) Repaint(c.Value.q, c.Value.r); }
@@ -434,6 +447,101 @@ namespace Game.Common
         public void ClearPaint(HexCoords c)
         {
             if (_slots.ContainsKey((c.q, c.r))) Repaint(c.q, c.r);
+        }
+
+        // === New Visual Feedback API ===
+
+        public void ShowDestCursor(HexCoords c, string labelText)
+        {
+            if (!grid) return;
+            Vector3 pos = c.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
+            pos.y += 0.1f; // Slight offset
+
+            // 1. Cursor
+            if (targetCursorPrefab)
+            {
+                if (!_currentCursor) _currentCursor = Instantiate(targetCursorPrefab, transform);
+                _currentCursor.transform.position = pos;
+                _currentCursor.SetActive(true);
+            }
+
+            // 2. Label
+            if (costLabelPrefab)
+            {
+                if (!_currentLabel) _currentLabel = Instantiate(costLabelPrefab, transform);
+                _currentLabel.transform.position = pos + Vector3.up * 1.5f; // Float above
+                _currentLabel.SetActive(true);
+
+                // Try setting text on various components
+                var tmpro = _currentLabel.GetComponentInChildren<TMPro.TMP_Text>();
+                if (tmpro) tmpro.text = labelText;
+                else
+                {
+                    var uiText = _currentLabel.GetComponentInChildren<UnityEngine.UI.Text>();
+                    if (uiText) uiText.text = labelText;
+                }
+            }
+        }
+
+        public void ShowPath(IList<HexCoords> path)
+        {
+            if (!grid || path == null || path.Count == 0) return;
+
+            // Recycle active nodes
+            foreach (var node in _activePathNodes)
+            {
+                node.SetActive(false);
+                _pathNodePool.Enqueue(node);
+            }
+            _activePathNodes.Clear();
+
+            if (!pathNodePrefab) return;
+
+            // Iterate path, skipping the last one (covered by cursor)
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                HexCoords current = path[i];
+                HexCoords next = path[i + 1];
+
+                Vector3 pos = current.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
+                pos.y += 0.05f;
+
+                GameObject node = GetPathNode();
+                node.transform.position = pos;
+
+                // Rotate to face next tile
+                Vector3 nextPos = next.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
+                Vector3 dir = (nextPos - pos).normalized;
+                if (dir != Vector3.zero)
+                {
+                    node.transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+                }
+
+                node.SetActive(true);
+                _activePathNodes.Add(node);
+            }
+        }
+
+        public void ClearVisuals()
+        {
+            if (_currentCursor) _currentCursor.SetActive(false);
+            if (_currentLabel) _currentLabel.SetActive(false);
+
+            foreach (var node in _activePathNodes)
+            {
+                node.SetActive(false);
+                _pathNodePool.Enqueue(node);
+            }
+            _activePathNodes.Clear();
+        }
+
+        private GameObject GetPathNode()
+        {
+            if (_pathNodePool.Count > 0)
+            {
+                return _pathNodePool.Dequeue();
+            }
+            return Instantiate(pathNodePrefab, transform);
         }
     }
 }

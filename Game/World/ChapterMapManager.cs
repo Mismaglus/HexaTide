@@ -195,10 +195,27 @@ namespace Game.World
             var topRowNodes = GetNodesInRow(_maxRow);
 
             HexCoords startCoords = GetCenterOfRow(bottomRowNodes);
-            HexCoords bossCoords = GetCenterOfRow(topRowNodes);
 
             if (_nodes.ContainsKey(startCoords)) _nodes[startCoords].Initialize(ChapterNodeType.Start);
-            if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
+
+            // Sort top row by Q to identify Left/Center/Right
+            topRowNodes.Sort((a, b) => a.GetComponent<HexCell>().Coords.q.CompareTo(b.GetComponent<HexCell>().Coords.q));
+
+            // Assign Gates to Top Row
+            if (topRowNodes.Count >= 3)
+            {
+                // Left
+                topRowNodes[0].Initialize(ChapterNodeType.LeftGate);
+                // Right
+                topRowNodes[topRowNodes.Count - 1].Initialize(ChapterNodeType.RightGate);
+                // Center (Skip)
+                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.SkipGate);
+            }
+            else if (topRowNodes.Count > 0)
+            {
+                // Fallback if map is too narrow
+                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.SkipGate);
+            }
 
             var validCandidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();
 

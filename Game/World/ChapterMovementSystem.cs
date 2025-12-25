@@ -25,8 +25,9 @@ namespace Game.World
         public bool doubleClickToConfirm = true;
 
         [Header("Visuals")]
-        public GameObject ghostPrefab; // Optional: Semi-transparent player model
-        private GameObject _activeGhost;
+        // Removed ghostPrefab logic as per refactor
+        // public GameObject ghostPrefab; 
+        // private GameObject _activeGhost;
 
         // State
         private Camera _cam;
@@ -107,7 +108,7 @@ namespace Game.World
                     _hoveredCoords = null;
                     if (_plannedDestination == null)
                     {
-                        highlighter.ClearAll(); // Only clear if not planning
+                        highlighter.ClearVisuals(); // Only clear if not planning
                         if (outlineManager) outlineManager.Hide();
 
                         // Clear Unit Highlight
@@ -128,13 +129,22 @@ namespace Game.World
             // If we have a plan locked in, don't update highlights based on hover
             if (_plannedDestination.HasValue) return;
 
-            highlighter.ClearAll();
-            highlighter.SetHover(tile);
+            highlighter.ClearVisuals();
 
             // Show outline if available
             if (outlineManager)
             {
                 outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
+            }
+
+            // Calculate path for hover preview
+            if (_playerUnit != null && !_playerUnit.Coords.Equals(tile))
+            {
+                var path = ChapterPathfinder.FindPath(_playerUnit.Coords, tile, grid);
+                if (path != null && path.Count > 0)
+                {
+                    highlighter.ShowDestCursor(tile, $"{path.Count} Steps");
+                }
             }
 
             // Unit Highlight Logic
@@ -178,103 +188,96 @@ namespace Game.World
             }
             else
             {
-                // If double click is disabled, just move immediately
-                PlanMove(target);
-                if (_currentPath != null && _currentPath.Count > 0) ExecuteMove();
-            }
-        }
-
-        void PlanMove(HexCoords target)
-        {
-            ClearPlan(); // Remove old ghosts/lines
+                visuals
 
             if (_playerUnit.Coords.Equals(target)) return; // Clicked on self
 
-            // Debugging Pathfinding
-            if (ChapterMapManager.Instance == null) { Debug.LogError("ChapterMapManager missing!"); return; }
-            var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
-            var endNode = ChapterMapManager.Instance.GetNodeAt(target);
+                // Debugging Pathfinding
+                if (ChapterMapManager.Instance == null) { Debug.LogError("ChapterMapManager missing!"); return; }
+                var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
+                var endNode = ChapterMapManager.Instance.GetNodeAt(target);
 
-            if (startNode == null)
-            {
-                Debug.LogError($"Start Node {_playerUnit.Coords} not found in MapManager!");
-                ChapterMapManager.Instance.DebugDumpNodes();
-            }
-            if (endNode == null)
-            {
-                Debug.LogError($"End Node {target} not found in MapManager!");
-                ChapterMapManager.Instance.DebugDumpNodes();
-                // Try fallback lookup in case comparer mismatch
-                endNode = ChapterMapManager.Instance.GetNodeAt(target);
-                if (endNode != null)
+                if (startNode == null)
                 {
-                    Debug.LogWarning($"[ChapterMovementSystem] Fallback found node at {target} after initial miss.");
+                    Debug.LogError($"Start Node {_playerUnit.Coords} not found in MapManager!");
+                    ChapterMapManager.Instance.DebugDumpNodes();
                 }
+                if (endNode == null)
+                {
+                    Debug.LogError($"End Node {target} not found in MapManager!");
+                    ChapterMapManager.Instance.DebugDumpNodes();
+                    // Try fallback lookup in case comparer mismatch
+                    endNode = ChapterMapManager.Instance.GetNodeAt(target);
+                    if (endNode != null)
+                    {
+                        Debug.LogWarning($"[ChapterMovementSystem] Fallback found node at {target} after initial miss.");
+                    }
+                }
+
+                if (startNode == null || endNode == null)
+                {
+                    Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start({startNode != null}) or end({endNode != null}) is missing. Target: {target}");
+                    Debug.LogWarning("[ChapterMovementSystem] Aborting PlanMove because start or end node is missing.");
+                    return;
+                }
+
+                // Calculate Path using the new simple Pathfinder
+                var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
+
+                if (path == null || path.Count == 0)
+                {
+                    Debug.Log($"Path blocked or invalid. Start: {_playerUnit.Coords}, End: {target}");
+                    // TODO: Play 'Cannot Move' sound
+                    return;
+                }
+
+                // Valid Plan
+                _plannedDestination = target;
+                _currentPath = path;
+
+                // Draw visuals
+                if (highlighter)
+                {
+                    highlighter.ClearVisuals();
+                    highlighter.ShowDestCursor(target, $"{path.Count} Steps");
+                }
+
+                Debug.Log($"[Map] Plan set for {target}. Click again to go.");
             }
 
-            if (startNode == null || endNode == null)
+            void ExecuteMove()
             {
-                Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start({startNode != null}) or end({endNode != null}) is missing. Target: {target}");
-                Debug.LogWarning("[ChapterMovementSystem] Aborting PlanMove because start or end node is missing.");
-                return;
+                if (_currentPath == null || _currentPath.Count == 0) return;
+
+                // Cleanup visuals before moving
+                highlighter.ClearVisuals();
+                _plannedDestination = null;
+
+                // Send to Mover
+                _playerMover.FollowPath(_currentPath, OnMoveFinished);
             }
 
-            // Calculate Path using the new simple Pathfinder
-            var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
-
-            if (path == null || path.Count == 0)
+            void ClearPlan()
             {
-                Debug.Log($"Path blocked or invalid. Start: {_playerUnit.Coords}, End: {target}");
-                // TODO: Play 'Cannot Move' sound
-                return;
+                _plannedDestination = null;
+                _currentPath = null;
+                highlighter.ClearVisuals
+                _playerMover.FollowPath(_currentPath, OnMoveFinished);
             }
 
-            // Valid Plan
-            _plannedDestination = target;
-            _currentPath = path;
-
-            // Draw visuals
-            if (highlighter)
+            void ClearPlan()
             {
+                _plannedDestination = null;
+                _currentPath = null;
+                if (_activeGhost != null) Destroy(_activeGhost);
                 highlighter.ClearAll();
-                highlighter.ApplyRange(path); // Lights up the road
+                if (outlineManager) outlineManager.Hide();
             }
 
-            if (ghostPrefab != null && grid != null)
+            void OnMoveFinished()
             {
-                Vector3 pos = grid.GetTileWorldPosition(target);
-                _activeGhost = Instantiate(ghostPrefab, pos, Quaternion.identity);
+                // UnitMover has finished animating
+                // ChapterMapManager listens to UnitMover events to trigger encounters/tide
             }
-
-            Debug.Log($"[Map] Plan set for {target}. Click again to go.");
-        }
-
-        void ExecuteMove()
-        {
-            if (_currentPath == null || _currentPath.Count == 0) return;
-
-            // Cleanup visuals before moving
-            if (_activeGhost != null) Destroy(_activeGhost);
-            highlighter.ClearAll();
-            _plannedDestination = null;
-
-            // Send to Mover
-            _playerMover.FollowPath(_currentPath, OnMoveFinished);
-        }
-
-        void ClearPlan()
-        {
-            _plannedDestination = null;
-            _currentPath = null;
-            if (_activeGhost != null) Destroy(_activeGhost);
-            highlighter.ClearAll();
-            if (outlineManager) outlineManager.Hide();
-        }
-
-        void OnMoveFinished()
-        {
-            // UnitMover has finished animating
-            // ChapterMapManager listens to UnitMover events to trigger encounters/tide
         }
     }
-}

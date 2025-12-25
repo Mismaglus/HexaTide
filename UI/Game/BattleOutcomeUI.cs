@@ -212,6 +212,33 @@ namespace Game.UI
             ClaimRewards();
             BattleContext.Reset();
 
+            // Check Encounter Context for Return Policy
+            var context = Game.World.EncounterContext.Current;
+
+            if (context != null && context.returnPolicy == Game.World.ReturnPolicy.ExitChapter)
+            {
+                Debug.Log($"[BattleOutcome] Exiting Chapter via {context.gateKind}. Destination: {context.destination}");
+
+                // Clear Map Data as we are leaving the chapter
+                Game.World.MapRuntimeData.Clear();
+
+                // Load Next Scene
+                if (!string.IsNullOrEmpty(context.destination))
+                {
+                    SceneManager.LoadScene(context.destination);
+                }
+                else
+                {
+                    Debug.LogError("[BattleOutcome] ExitChapter policy set but no destination provided!");
+                    SceneManager.LoadScene("MainMenu"); // Fallback
+                }
+
+                // Reset Context
+                Game.World.EncounterContext.Reset();
+                return;
+            }
+
+            // Default: Return to Chapter
             // ⭐ 1. Mark the current node as cleared in our persistent data
             if (Game.World.MapRuntimeData.HasData)
             {
@@ -223,6 +250,9 @@ namespace Game.UI
             // ⭐ 2. Return to the Map Scene
             // Make sure "MapScene" is added to your Build Settings!
             SceneManager.LoadScene("MapScene");
+
+            // Reset Context
+            Game.World.EncounterContext.Reset();
         }
 
         void OnDefeatRetry()

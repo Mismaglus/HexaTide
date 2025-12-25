@@ -47,7 +47,7 @@ namespace Game.World
         public void SetCleared(bool cleared)
         {
             isCleared = cleared;
-            // TODO: Update visual state
+            // TODO: Update visual state (e.g. gray out marker)
         }
 
         public void Interact()
@@ -56,9 +56,10 @@ namespace Game.World
 
             Debug.Log($"[ChapterNode] Interact: {type}");
 
-            // --- Determine Policy & Context ---
+            // --- 1. Construct the Context based on Node Type ---
             EncounterContext context = new EncounterContext();
 
+            // Check if this node forces us to leave the chapter (Bosses/Gates)
             bool isExitNode = (type == ChapterNodeType.Gate_Left ||
                                type == ChapterNodeType.Gate_Right ||
                                type == ChapterNodeType.Gate_Skip ||
@@ -67,34 +68,33 @@ namespace Game.World
             if (isExitNode)
             {
                 // Policy: Exit Chapter.
-                // Do NOT save map state, because we won't return to this map instance.
+                // We do NOT save map state, because the chapter is effectively over.
                 context.policy = ReturnPolicy.ExitChapter;
 
-                // Configure Gate Kind for Act transition logic
+                // Configure Gate Kind so BattleOutcome knows where to go next
                 if (type == ChapterNodeType.Gate_Left) context.gateKind = GateKind.LeftGate;
                 else if (type == ChapterNodeType.Gate_Right) context.gateKind = GateKind.RightGate;
                 else if (type == ChapterNodeType.Gate_Skip) context.gateKind = GateKind.SkipGate;
-
-                // context.nextChapterId will be handled by the BattleOutcome logic based on GateKind
+                else context.gateKind = GateKind.None; // Generic Boss
             }
             else
             {
                 // Policy: Return To Chapter.
-                // MUST save map state so we can restore it after the battle scene.
+                // We MUST save map state so we can restore player position and tide after battle.
                 context.policy = ReturnPolicy.ReturnToChapter;
+
                 if (ChapterMapManager.Instance != null)
                 {
                     ChapterMapManager.Instance.SaveMapState();
                 }
             }
 
-            // --- Trigger Logic ---
+            // --- 2. Trigger the Interaction ---
 
+            // If a specific encounter component is attached, use it
             if (specificEncounter != null)
             {
-                // Pass context to the specific encounter (needs refactoring EncounterNode too if it doesn't support it yet)
-                // For now, assuming EncounterNode handles scene loading:
-                specificEncounter.StartEncounter(context);
+                specificEncounter.StartEncounter(context); // <--- PASS CONTEXT HERE
                 return;
             }
 
@@ -106,17 +106,17 @@ namespace Game.World
                 case ChapterNodeType.Gate_Left:
                 case ChapterNodeType.Gate_Right:
                 case ChapterNodeType.Gate_Skip:
-                    TriggerBattle(context);
+                    TriggerBattle(context); // <--- PASS CONTEXT HERE
                     break;
 
                 case ChapterNodeType.Merchant:
-                    Debug.Log("Open Merchant UI");
+                    Debug.Log("Open Merchant UI (Not Implemented)");
                     break;
 
                 case ChapterNodeType.Treasure:
                     Debug.Log("Open Treasure Chest");
                     SetCleared(true);
-                    // Update save immediately for non-scene interactions if we stay in map
+                    // Update save immediately for non-battle interactions if we stay in map
                     if (!isExitNode && ChapterMapManager.Instance != null)
                         ChapterMapManager.Instance.SaveMapState();
                     break;
@@ -125,11 +125,12 @@ namespace Game.World
 
         void TriggerBattle(EncounterContext context)
         {
+            // Dynamically get or add EncounterNode if missing
             var encounter = GetComponent<EncounterNode>();
             if (encounter == null) encounter = gameObject.AddComponent<EncounterNode>();
 
-            Debug.Log($"[ChapterNode] Triggering Battle with Policy: {context.policy}");
-            encounter.StartEncounter(context);
+            Debug.Log($"[ChapterNode] Triggering Generic Battle. Policy: {context.policy}");
+            encounter.StartEncounter(context); // <--- PASS CONTEXT HERE
         }
     }
 }

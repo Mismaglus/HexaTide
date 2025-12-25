@@ -1,30 +1,21 @@
-// Scripts/Game/Battle/BattleContext.cs
-using Game.Inventory;
 using UnityEngine;
+using Game.World; // 引用 EncounterContext
 
 namespace Game.Battle
 {
     /// <summary>
-    /// Serves as a bridge to pass transient data into the Battle Scene.
-    /// Configure this before loading "BattleScene".
+    /// Holds static runtime data for the current battle session.
+    /// Acts as a bridge between the Chapter Map and the Battle Scene.
     /// </summary>
     public static class BattleContext
     {
-        // The specific loot table for the upcoming battle (e.g., "Goblin Drop", "Boss Chest")
-        public static LootTableSO ActiveLootTable;
+        // 使用 Nullable，如果是 null 说明是直接在这个场景运行 debug，或者没有前置上下文
+        public static EncounterContext? EncounterContext;
 
-        // The context for the encounter (e.g. return policy, next chapter)
-        public static Game.World.EncounterContext? EncounterContext;
-
-        /// <summary>
-        /// Clears the context. Call this when returning to the Map/Menu to ensure 
-        /// the next battle doesn't accidentally use old data.
-        /// </summary>
         public static void Reset()
         {
-            ActiveLootTable = null;
             EncounterContext = null;
-            Debug.Log("[BattleContext] Reset.");
+            // 如果未来有其他战斗临时数据（如累计伤害等），也在这里重置
         }
     }
 }

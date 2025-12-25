@@ -234,7 +234,7 @@ namespace Game.UI
                 }
 
                 // Reset Context
-                Game.World.EncounterContext.Reset();
+                Game.World.EncounterContext.Clear();
                 return;
             }
 
@@ -252,7 +252,7 @@ namespace Game.UI
             SceneManager.LoadScene("MapScene");
 
             // Reset Context
-            Game.World.EncounterContext.Reset();
+            Game.World.EncounterContext.Clear();
         }
 
         void OnDefeatRetry()

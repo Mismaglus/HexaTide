@@ -13,9 +13,9 @@ namespace Game.World
         Treasure,
         Mystery,
         Boss,
-        LeftGate,
-        RightGate,
-        SkipGate
+        GateLeft,
+        GateRight,
+        GateSkip
     }
 
     [RequireComponent(typeof(HexCell))]
@@ -50,6 +50,18 @@ namespace Game.World
             // TODO: Update visual state (e.g. gray out icon)
         }
 
+        public ReturnPolicy Policy
+        {
+            get
+            {
+                if (type == ChapterNodeType.GateLeft || type == ChapterNodeType.GateRight || type == ChapterNodeType.GateSkip)
+                {
+                    return ReturnPolicy.ExitChapter;
+                }
+                return ReturnPolicy.ReturnToChapter;
+            }
+        }
+
         public void Interact()
         {
             if (isCleared) return;
@@ -58,47 +70,29 @@ namespace Game.World
 
             // Setup Encounter Context
             EncounterContext.Current = new EncounterContext();
-
-            // Try to get coords
-            var tileTag = GetComponent<Game.Common.TileTag>();
-            if (tileTag != null) EncounterContext.Current.nodeCoords = tileTag.Coords;
-
-            // Set Chapter ID (Placeholder)
-            EncounterContext.Current.chapterId = "Act1_Chapter1";
+            EncounterContext.Current.nodeType = type;
+            EncounterContext.Current.policy = Policy;
 
             // Determine Policy
-            if (type == ChapterNodeType.LeftGate || type == ChapterNodeType.RightGate || type == ChapterNodeType.SkipGate)
+            if (Policy == ReturnPolicy.ExitChapter)
             {
-                EncounterContext.Current.returnPolicy = ReturnPolicy.ExitChapter;
-
-                if (type == ChapterNodeType.LeftGate)
+                if (type == ChapterNodeType.GateLeft)
                 {
-                    EncounterContext.Current.gateKind = GateKind.Left;
-                    EncounterContext.Current.destination = "MapScene_Act2_Left";
+                    EncounterContext.Current.nextChapterId = "MapScene_Act2_Left";
                 }
-                else if (type == ChapterNodeType.RightGate)
+                else if (type == ChapterNodeType.GateRight)
                 {
-                    EncounterContext.Current.gateKind = GateKind.Right;
-                    EncounterContext.Current.destination = "MapScene_Act2_Right";
+                    EncounterContext.Current.nextChapterId = "MapScene_Act2_Right";
                 }
                 else
                 {
-                    EncounterContext.Current.gateKind = GateKind.Skip;
-                    EncounterContext.Current.destination = "Act3Scene";
+                    EncounterContext.Current.nextChapterId = "Act3Scene";
                 }
-
-                EncounterContext.Current.encounterKind = EncounterKind.BossGate;
 
                 // Boss Gate: Do NOT save map state (as we are leaving)
             }
             else
             {
-                EncounterContext.Current.returnPolicy = ReturnPolicy.ReturnToChapter;
-                EncounterContext.Current.encounterKind = EncounterKind.Normal;
-
-                if (type == ChapterNodeType.EliteEnemy) EncounterContext.Current.encounterKind = EncounterKind.Elite;
-                if (type == ChapterNodeType.Boss) EncounterContext.Current.encounterKind = EncounterKind.BossGate;
-
                 // Normal Node: Save Map State
                 if (ChapterMapManager.Instance != null)
                 {
@@ -118,9 +112,9 @@ namespace Game.World
                 case ChapterNodeType.NormalEnemy:
                 case ChapterNodeType.EliteEnemy:
                 case ChapterNodeType.Boss:
-                case ChapterNodeType.LeftGate:
-                case ChapterNodeType.RightGate:
-                case ChapterNodeType.SkipGate:
+                case ChapterNodeType.GateLeft:
+                case ChapterNodeType.GateRight:
+                case ChapterNodeType.GateSkip:
                     TriggerGenericBattle();
                     break;
 

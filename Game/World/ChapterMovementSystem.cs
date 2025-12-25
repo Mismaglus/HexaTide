@@ -12,6 +12,7 @@ namespace Game.World
     /// <summary>
     /// Handles player input and movement specifically for the Chapter Map.
     /// Decoupled from BattleRules. Uses ChapterPathfinder.
+    /// Refactored: Uses ShowDestCursor for preview instead of Ghosts/Range.
     /// </summary>
     public class ChapterMovementSystem : MonoBehaviour
     {
@@ -30,22 +31,23 @@ namespace Game.World
         private UnitMover _playerMover;
 
         private HexCoords? _hoveredCoords;
-        private HexCoords? _plannedDestination;
+        private HexCoords? _plannedDestination; // Where we WANT to go (awaiting confirmation)
         private List<HexCoords> _currentPath;
 
         void Start()
         {
             _cam = Camera.main;
-            if (!grid) grid = Object.FindFirstObjectByType<BattleHexGrid>();
-            if (!highlighter) highlighter = Object.FindFirstObjectByType<HexHighlighter>();
-            if (!outlineManager) outlineManager = Object.FindFirstObjectByType<ChapterOutlineManager>();
+            if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
+            if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>();
+            if (!outlineManager) outlineManager = FindFirstObjectByType<ChapterOutlineManager>();
 
             FindPlayer();
         }
 
         void FindPlayer()
         {
-            var units = Object.FindObjectsByType<Game.Core.FactionMembership>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            // Find unit tagged as Player Side
+            var units = FindObjectsByType<Game.Core.FactionMembership>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var f in units)
             {
                 if (f.side == Game.Core.Side.Player)
@@ -59,31 +61,36 @@ namespace Game.World
 
         void Update()
         {
+            // Safety checks
             if (_playerUnit == null) { FindPlayer(); return; }
-            if (_playerMover != null && _playerMover.IsMoving) return;
+            if (_playerMover != null && _playerMover.IsMoving) return; // Block input while moving
 
             HandleInput();
         }
 
         void HandleInput()
         {
+            // 1. Cancel Logic (Right Click)
             if (Mouse.current.rightButton.wasPressedThisFrame)
             {
                 ClearPlan();
                 return;
             }
 
+            // 2. Raycast Logic
             if (Mouse.current == null) return;
             Vector2 mousePos = Mouse.current.position.ReadValue();
 
             if (HexRaycaster.TryPick(_cam, mousePos, out var go, out var tag, (int)terrainLayer))
             {
+                // On Hover Change
                 if (!_hoveredCoords.HasValue || !_hoveredCoords.Value.Equals(tag.Coords))
                 {
                     _hoveredCoords = tag.Coords;
                     OnHoverTile(_hoveredCoords.Value);
                 }
 
+                // On Click
                 if (Mouse.current.leftButton.wasPressedThisFrame)
                 {
                     OnLeftClick(_hoveredCoords.Value);
@@ -91,96 +98,142 @@ namespace Game.World
             }
             else
             {
+                // Mouse off grid
                 if (_hoveredCoords.HasValue)
                 {
                     _hoveredCoords = null;
-                    highlighter.SetHover(null);
-
-                    // Only clear visuals if we are NOT planning a move
-                    if (!_plannedDestination.HasValue)
+                    if (_plannedDestination == null)
                     {
-                        highlighter.ClearVisuals();
+                        highlighter.ClearVisuals(); // Clean up cursor/labels
                         if (outlineManager) outlineManager.Hide();
+
+                        // Clear Unit Highlight
+                        if (_playerUnit != null)
+                        {
+                            var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                            if (uh) uh.SetHover(false);
+                        }
                     }
                 }
             }
         }
 
+        // --- Logic ---
+
         void OnHoverTile(HexCoords tile)
         {
+            // If we have a plan locked in, don't update highlights based on hover
+            if (_plannedDestination.HasValue) return;
+
+            // In Chapter Mode, we usually just show the cursor on click, 
+            // but if we want hover feedback, we could show a basic cursor.
+            // For now, let's keep it clean: simple tile highlight + Unit Highlight.
+
+            // Note: We use SetHover (tile color) but we DON'T show the destination cursor yet.
+            // Destination cursor is shown in PlanMove (on Click).
+
             highlighter.SetHover(tile);
 
-            // If we are NOT planning, we can show outline or simple hover
-            if (!_plannedDestination.HasValue)
+            // Show outline if available
+            if (outlineManager)
             {
-                highlighter.ClearVisuals(); // Ensure no stale cursors
-                if (outlineManager)
+                outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
+            }
+
+            // Unit Highlight Logic
+            if (ChapterMapManager.Instance != null)
+            {
+                if (_playerUnit != null && _playerUnit.Coords.Equals(tile))
                 {
-                    outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
+                    var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                    if (uh) uh.SetHover(true);
+                }
+                else
+                {
+                    if (_playerUnit != null)
+                    {
+                        var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
+                        if (uh) uh.SetHover(false);
+                    }
                 }
             }
         }
 
         void OnLeftClick(HexCoords target)
         {
-            // If we clicked the same tile we planned for, execute
+            // Case A: We are already planning a move to THIS tile -> Confirm execution
             if (_plannedDestination.HasValue && _plannedDestination.Value.Equals(target))
             {
                 ExecuteMove();
                 return;
             }
 
-            // Otherwise, plan a new move
-            PlanMove(target);
+            // Case B: We are planning a move to a DIFFERENT tile -> Change plan
+            // Case C: No plan yet -> Start planning
+
+            if (doubleClickToConfirm)
+            {
+                PlanMove(target);
+            }
+            else
+            {
+                // If double click is disabled, just move immediately
+                PlanMove(target);
+                if (_currentPath != null && _currentPath.Count > 0) ExecuteMove();
+            }
         }
 
         void PlanMove(HexCoords target)
         {
-            if (_playerUnit.Coords.Equals(target)) return;
+            ClearPlan(); // Remove old visuals
 
-            if (ChapterMapManager.Instance == null) return;
+            if (_playerUnit.Coords.Equals(target)) return; // Clicked on self
 
-            // Check if nodes exist (optional safety)
+            // Debugging Pathfinding
+            if (ChapterMapManager.Instance == null) { Debug.LogError("ChapterMapManager missing!"); return; }
             var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
             var endNode = ChapterMapManager.Instance.GetNodeAt(target);
 
             if (startNode == null || endNode == null)
             {
-                Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove. Start or End node missing.");
+                Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start or end node is missing. Target: {target}");
                 return;
             }
 
+            // Calculate Path
             var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
 
             if (path == null || path.Count == 0)
             {
-                Debug.Log($"Path blocked or invalid.");
+                Debug.Log($"Path blocked or invalid. Start: {_playerUnit.Coords}, End: {target}");
+                // TODO: Play 'Cannot Move' sound
                 return;
             }
 
+            // Valid Plan
             _plannedDestination = target;
             _currentPath = path;
 
-            // Visuals
+            // Draw visuals: Use the new ShowDestCursor API
             if (highlighter)
             {
-                highlighter.ClearVisuals();
-                highlighter.ShowDestCursor(target, $"{path.Count} Steps");
-                highlighter.SetSelected(target);
+                // Show "X Steps" label
+                string label = $"{path.Count} Steps";
+                highlighter.ShowDestCursor(target, label);
             }
+
+            Debug.Log($"[Map] Plan set for {target} ({path.Count} steps). Click again to go.");
         }
 
         void ExecuteMove()
         {
             if (_currentPath == null || _currentPath.Count == 0) return;
 
-            // Clear visuals before moving
+            // Cleanup visuals before moving
             highlighter.ClearVisuals();
-            highlighter.SetSelected(null);
-            highlighter.SetHover(null);
-
             _plannedDestination = null;
 
+            // Send to Mover
             _playerMover.FollowPath(_currentPath, OnMoveFinished);
         }
 
@@ -188,17 +241,14 @@ namespace Game.World
         {
             _plannedDestination = null;
             _currentPath = null;
-
-            highlighter.ClearVisuals();
-            highlighter.SetSelected(null);
-
+            highlighter.ClearVisuals(); // Clears Cursor and Labels
             if (outlineManager) outlineManager.Hide();
         }
 
         void OnMoveFinished()
         {
-            // Optional: Auto-interact logic is handled by ChapterMapManager via UnitMover events usually, 
-            // or we can trigger something here.
-            // ChapterMapManager listens to OnMoveFinished on the UnitMover.
+            // UnitMover has finished animating
+            // ChapterMapManager listens to UnitMover events to trigger encounters/tide
         }
     }
+}

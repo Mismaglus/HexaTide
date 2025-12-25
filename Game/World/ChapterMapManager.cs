@@ -26,6 +26,9 @@ namespace Game.World
         public int merchantCount = 2;
         public int mysteryCount = 4;
 
+        [Header("Act Settings")]
+        public bool isAct1 = true; // Simple toggle for now to distinguish generation logic
+
         // Runtime State
         private int _currentSeed;
         private int _playerMoveCount = 0;
@@ -34,14 +37,12 @@ namespace Game.World
         private int _maxRow;
 
         private Unit _playerUnit;
-        // Explicit comparer to avoid any hash/equality surprises with structs
         private static readonly HexCoordsComparer _hexComparer = new HexCoordsComparer();
         private Dictionary<HexCoords, ChapterNode> _nodes = new Dictionary<HexCoords, ChapterNode>(_hexComparer);
 
         public int CurrentTideRow => _currentTideRow;
         public int MovesBeforeNextTide => movesPerTideStep - (_playerMoveCount % movesPerTideStep);
 
-        // Dedicated equality comparer for HexCoords to ensure consistent dictionary lookups
         private sealed class HexCoordsComparer : IEqualityComparer<HexCoords>
         {
             public bool Equals(HexCoords a, HexCoords b) => a.q == b.q && a.r == b.r;
@@ -53,26 +54,21 @@ namespace Game.World
             Instance = this;
             if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
 
-            // Force disable FogOfWarSystem if present in this scene
+            // Disable FogOfWarSystem in Chapter Scene
             var fogSystem = FindFirstObjectByType<Game.Battle.FogOfWarSystem>();
             if (fogSystem != null)
             {
-                Debug.LogWarning("[ChapterMapManager] Found FogOfWarSystem in Chapter Scene. Disabling it to prevent conflicts.");
-                fogSystem.enableFog = false; // Disable logic
-                fogSystem.enabled = false;   // Disable component
+                Debug.LogWarning("[ChapterMapManager] Disabling FogOfWarSystem in Chapter Scene.");
+                fogSystem.enableFog = false;
+                fogSystem.enabled = false;
             }
 
-            // Disable Fog Visualization in Highlighter
             var highlighter = grid.GetComponent<Game.Common.HexHighlighter>();
-            if (highlighter)
-            {
-                highlighter.ignoreFog = true;
-            }
+            if (highlighter) highlighter.ignoreFog = true;
         }
 
         void Start()
         {
-            // ⭐ Phase 4 Logic: Check for saved state
             if (MapRuntimeData.HasData)
             {
                 RestoreMapState();
@@ -83,8 +79,6 @@ namespace Game.World
             }
 
             InitializePlayer();
-
-            // Apply visual updates after player is placed
             UpdateTideVisuals();
         }
 
@@ -102,32 +96,22 @@ namespace Game.World
 
         void GenerateNewMap()
         {
-            // Pick a new seed
             _currentSeed = (int)System.DateTime.Now.Ticks;
-
             GenerateGridGeometry(_currentSeed);
-            AssignContent(); // Randomly place content
-
-            // Tide starts 1 row below
+            AssignContent();
             _currentTideRow = _minRow - 1;
         }
 
         void RestoreMapState()
         {
             Debug.Log("[ChapterMapManager] Restoring Map from Save...");
-
-            // 1. Restore Seed & Geometry
             _currentSeed = MapRuntimeData.MapSeed;
             GenerateGridGeometry(_currentSeed);
-
-            // 2. Re-run Content Assignment (Deterministic because we reset RNG with same seed)
             AssignContent();
 
-            // 3. Restore Vars
             _currentTideRow = MapRuntimeData.CurrentTideRow;
             _playerMoveCount = MapRuntimeData.MovesTaken;
 
-            // 4. Apply "Cleared" status
             foreach (var coord in MapRuntimeData.ClearedNodes)
             {
                 if (_nodes.TryGetValue(coord, out var node))
@@ -141,7 +125,6 @@ namespace Game.World
         {
             if (grid == null || mapRecipe == null) return;
 
-            // Ensure determinism for holes
             mapRecipe.randomSeed = seed;
             grid.Rebuild();
 
@@ -157,69 +140,66 @@ namespace Game.World
                 if (tile.Coords.r < _minRow) _minRow = tile.Coords.r;
                 if (tile.Coords.r > _maxRow) _maxRow = tile.Coords.r;
 
-                // ⭐ 1. Force Map Visibility Logic
-                // Get the cell and force it to be visible immediately
                 var cell = tile.GetComponent<HexCell>();
                 if (cell != null)
                 {
                     cell.SetFogStatus(FogStatus.Visible);
-                    // Also ensure the visual is updated immediately
                     cell.RefreshFogVisuals();
                 }
 
-                // ⭐ 2. Setup Node Logic
                 var node = tile.GetComponent<ChapterNode>();
                 if (node == null) node = tile.gameObject.AddComponent<ChapterNode>();
-
-                if (_nodes.ContainsKey(tile.Coords))
-                {
-                    Debug.LogWarning($"[ChapterMapManager] Duplicate node found at {tile.Coords}. Overwriting.");
-                }
                 _nodes[tile.Coords] = node;
                 node.Initialize(ChapterNodeType.NormalEnemy);
             }
 
-            Debug.Log($"[ChapterMapManager] Generated {_nodes.Count} nodes. MinRow={_minRow}, MaxRow={_maxRow}. Grid Child Count: {grid.transform.childCount}");
-
-            // Debug: Print all node coordinates
-            // string coords = string.Join(", ", _nodes.Keys.Select(k => k.ToString()));
-            // Debug.Log($"[ChapterMapManager] Node Coords: {coords}");
+            Debug.Log($"[ChapterMapManager] Generated {_nodes.Count} nodes. MinRow={_minRow}, MaxRow={_maxRow}.");
         }
 
         void AssignContent()
         {
-            // Initialize RNG with the Map Seed to ensure nodes are placed in the same spots
             Game.Common.GameRandom.Init(_currentSeed);
 
             var bottomRowNodes = GetNodesInRow(_minRow);
             var topRowNodes = GetNodesInRow(_maxRow);
 
+            // 1. Start Node (Bottom Center)
             HexCoords startCoords = GetCenterOfRow(bottomRowNodes);
-
             if (_nodes.ContainsKey(startCoords)) _nodes[startCoords].Initialize(ChapterNodeType.Start);
 
-            // Sort top row by Q to identify Left/Center/Right
-            topRowNodes.Sort((a, b) => a.GetComponent<HexCell>().Coords.q.CompareTo(b.GetComponent<HexCell>().Coords.q));
-
-            // Assign Gates to Top Row
-            if (topRowNodes.Count >= 3)
+            // 2. Boss / Gates (Top Row)
+            if (isAct1)
             {
-                // Left
-                topRowNodes[0].Initialize(ChapterNodeType.GateLeft);
-                // Right
-                topRowNodes[topRowNodes.Count - 1].Initialize(ChapterNodeType.GateRight);
-                // Center (Skip)
-                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.GateSkip);
+                // Act 1: Left Gate, Skip Gate (Center), Right Gate
+                if (topRowNodes.Count >= 3)
+                {
+                    // Sort by Q to find Left/Right
+                    topRowNodes.Sort((a, b) => a.GetComponent<HexCell>().Coords.q.CompareTo(b.GetComponent<HexCell>().Coords.q));
+
+                    var leftNode = topRowNodes[0];
+                    var rightNode = topRowNodes[topRowNodes.Count - 1];
+                    var centerNode = topRowNodes[topRowNodes.Count / 2];
+
+                    leftNode.Initialize(ChapterNodeType.Gate_Left);
+                    rightNode.Initialize(ChapterNodeType.Gate_Right);
+                    centerNode.Initialize(ChapterNodeType.Gate_Skip);
+                }
+                else
+                {
+                    Debug.LogWarning("Top row too narrow for 3 gates, placing single Boss.");
+                    HexCoords bossCoords = GetCenterOfRow(topRowNodes);
+                    if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
+                }
             }
-            else if (topRowNodes.Count > 0)
+            else
             {
-                // Fallback if map is too narrow
-                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.GateSkip);
+                // Act 2+: Single Boss at top
+                HexCoords bossCoords = GetCenterOfRow(topRowNodes);
+                if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
             }
 
+            // 3. Random Content (Elites, Merchants, Mystery)
             var validCandidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();
-
-            // Deterministic Shuffle
             validCandidates.Sort((a, b) => Game.Common.GameRandom.Range(0, 2) == 0 ? -1 : 1);
 
             int assigned = 0;
@@ -234,27 +214,20 @@ namespace Game.World
         }
 
         // =========================================================
-        // State Management
+        // State Management & Player Logic
         // =========================================================
 
         public void SaveMapState()
         {
-            // Gather cleared nodes
             List<HexCoords> cleared = new List<HexCoords>();
             foreach (var kvp in _nodes)
             {
                 if (kvp.Value.isCleared) cleared.Add(kvp.Key);
             }
 
-            // Current player position (or target if moving, but usually called before load)
             HexCoords playerPos = _playerUnit != null ? _playerUnit.Coords : default;
-
             MapRuntimeData.Save(_currentSeed, playerPos, _currentTideRow, _playerMoveCount, cleared);
         }
-
-        // =========================================================
-        // Player & Gameplay
-        // =========================================================
 
         void InitializePlayer()
         {
@@ -273,20 +246,12 @@ namespace Game.World
                 var mover = _playerUnit.GetComponent<UnitMover>();
                 if (mover != null) mover.OnMoveFinished += HandlePlayerMove;
 
-                // Position Player
                 if (MapRuntimeData.HasData && _nodes.ContainsKey(MapRuntimeData.PlayerPosition))
                 {
-                    // Restore position
                     _playerUnit.WarpTo(MapRuntimeData.PlayerPosition);
                 }
                 else
                 {
-                    if (MapRuntimeData.HasData)
-                    {
-                        Debug.LogWarning($"[ChapterMapManager] Saved player position {MapRuntimeData.PlayerPosition} is invalid for current map. Resetting to Start.");
-                    }
-
-                    // Start position
                     var startNode = _nodes.Values.FirstOrDefault(n => n.type == ChapterNodeType.Start);
                     if (startNode != null) _playerUnit.WarpTo(startNode.GetComponent<HexCell>().Coords);
                 }
@@ -295,22 +260,16 @@ namespace Game.World
 
         void HandlePlayerMove(HexCoords from, HexCoords to)
         {
-            // 1. Save current position immediately so we don't lose it if we crash/reload
-            MapRuntimeData.PlayerPosition = to;
+            MapRuntimeData.PlayerPosition = to; // Save pos immediately to memory
 
-            // 2. Interaction
             if (_nodes.TryGetValue(to, out var node))
             {
                 if (!node.isCleared)
                 {
-                    // We DO NOT auto-interact here for Battles anymore, 
-                    // because we need to Save BEFORE scene load.
-                    // ChapterNode.Interact() handles the flow.
                     node.Interact();
                 }
             }
 
-            // 3. Tide Logic
             _playerMoveCount++;
             if (_playerMoveCount % movesPerTideStep == 0)
             {
@@ -380,40 +339,7 @@ namespace Game.World
 
         public ChapterNode GetNodeAt(HexCoords coords)
         {
-            // Primary lookup
-            if (_nodes.TryGetValue(coords, out var node))
-            {
-                // Unity destroyed objects compare equal to null; clean up if stale
-                if (node != null)
-                {
-                    return node;
-                }
-
-                Debug.LogWarning($"[ChapterMapManager] Node at {coords} reference was destroyed. Rebuilding entry.");
-                _nodes.Remove(coords);
-            }
-
-            // Fallback: linear search to guard against any comparer/hash mismatch
-            foreach (var kvp in _nodes)
-            {
-                if (kvp.Key.q == coords.q && kvp.Key.r == coords.r && kvp.Value != null)
-                {
-                    Debug.LogWarning($"[ChapterMapManager] GetNodeAt fallback matched {coords} via linear scan. Updating dictionary entry.");
-                    _nodes[coords] = kvp.Value;
-                    return kvp.Value;
-                }
-            }
-
-            // Reconstruct from grid cell if possible
-            if (grid != null && grid.TryGetCell(coords, out var cell) && cell != null)
-            {
-                var rebuilt = cell.GetComponent<ChapterNode>() ?? cell.gameObject.AddComponent<ChapterNode>();
-                _nodes[coords] = rebuilt;
-                Debug.LogWarning($"[ChapterMapManager] Recreated ChapterNode at {coords} from grid cell.");
-                return rebuilt;
-            }
-
-            Debug.LogWarning($"[ChapterMapManager] Node at {coords} requested but not found. Total Nodes: {_nodes.Count}");
+            if (_nodes.TryGetValue(coords, out var node) && node != null) return node;
             return null;
         }
 

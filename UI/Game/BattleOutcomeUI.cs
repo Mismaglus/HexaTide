@@ -4,6 +4,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using Game.Battle;
+using Game.World;
 using Game.Inventory;
 using Game.Units;
 using Game.UI.Inventory;
@@ -210,22 +211,40 @@ namespace Game.UI
         void OnVictoryContinue()
         {
             ClaimRewards();
-            BattleContext.Reset();
 
             // Check Encounter Context for Return Policy
-            var context = Game.World.EncounterContext.Current;
+            var context = BattleContext.EncounterContext;
 
-            if (context != null && context.returnPolicy == Game.World.ReturnPolicy.ExitChapter)
+            if (context.HasValue && context.Value.policy == ReturnPolicy.ExitChapter)
             {
-                Debug.Log($"[BattleOutcome] Exiting Chapter via {context.gateKind}. Destination: {context.destination}");
+                var exitContext = context.Value;
+                var destination = exitContext.nextChapterId;
+
+                if (string.IsNullOrEmpty(destination))
+                {
+                    switch (exitContext.gateKind)
+                    {
+                        case GateKind.SkipGate:
+                            destination = "Act3_StarreachPeak";
+                            break;
+                        case GateKind.LeftGate:
+                            destination = "Act2_LeftBiome";
+                            break;
+                        case GateKind.RightGate:
+                            destination = "Act2_RightBiome";
+                            break;
+                    }
+                }
+
+                Debug.Log($"[BattleOutcome] Exiting Chapter via {exitContext.gateKind}. Destination: {destination}");
 
                 // Clear Map Data as we are leaving the chapter
-                Game.World.MapRuntimeData.Clear();
+                MapRuntimeData.Clear();
 
                 // Load Next Scene
-                if (!string.IsNullOrEmpty(context.destination))
+                if (!string.IsNullOrEmpty(destination))
                 {
-                    SceneManager.LoadScene(context.destination);
+                    SceneManager.LoadScene(destination);
                 }
                 else
                 {
@@ -234,17 +253,17 @@ namespace Game.UI
                 }
 
                 // Reset Context
-                Game.World.EncounterContext.Clear();
+                BattleContext.Reset();
                 return;
             }
 
             // Default: Return to Chapter
             // ⭐ 1. Mark the current node as cleared in our persistent data
-            if (Game.World.MapRuntimeData.HasData)
+            if (MapRuntimeData.HasData)
             {
                 // We clear the node where the player currently stands
-                Game.World.MapRuntimeData.ClearedNodes.Add(Game.World.MapRuntimeData.PlayerPosition);
-                Debug.Log($"[BattleOutcome] Node at {Game.World.MapRuntimeData.PlayerPosition} marked as cleared.");
+                MapRuntimeData.ClearedNodes.Add(MapRuntimeData.PlayerPosition);
+                Debug.Log($"[BattleOutcome] Node at {MapRuntimeData.PlayerPosition} marked as cleared.");
             }
 
             // ⭐ 2. Return to the Map Scene
@@ -252,7 +271,7 @@ namespace Game.UI
             SceneManager.LoadScene("MapScene");
 
             // Reset Context
-            Game.World.EncounterContext.Clear();
+            BattleContext.Reset();
         }
 
         void OnDefeatRetry()

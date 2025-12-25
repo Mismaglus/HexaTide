@@ -94,7 +94,7 @@ namespace Game.World
             {
                 // Pass context to the specific encounter (needs refactoring EncounterNode too if it doesn't support it yet)
                 // For now, assuming EncounterNode handles scene loading:
-                specificEncounter.StartEncounter();
+                specificEncounter.StartEncounter(context);
                 return;
             }
 
@@ -128,12 +128,8 @@ namespace Game.World
             var encounter = GetComponent<EncounterNode>();
             if (encounter == null) encounter = gameObject.AddComponent<EncounterNode>();
 
-            // TODO: Pass 'context' to EncounterNode so it can persist it across the scene load.
-            // For now, we assume EncounterNode triggers the scene load.
-            // You might need a static "FlowManager.CurrentContext = context;" here.
-
             Debug.Log($"[ChapterNode] Triggering Battle with Policy: {context.policy}");
-            encounter.StartEncounter();
+            encounter.StartEncounter(context);
         }
     }
 }

@@ -19,12 +19,14 @@ namespace Game.World
         public EncounterContext Context;
 
         // Call this when player clicks the node or collides with enemy
-        public void StartEncounter()
+        public void StartEncounter(EncounterContext context)
         {
+            Context = context;
+
             // 1. Configure the Bridge
             BattleContext.Reset(); // Clean up old data
             BattleContext.ActiveLootTable = specificLootTable;
-            BattleContext.EncounterContext = Context;
+            BattleContext.EncounterContext = context;
 
             // 2. Load the generic Battle Scene
             Debug.Log($"[Map] Loading battle with loot: {specificLootTable?.name}");

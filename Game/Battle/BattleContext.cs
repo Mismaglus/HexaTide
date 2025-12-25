@@ -14,7 +14,7 @@ namespace Game.Battle
         public static LootTableSO ActiveLootTable;
 
         // The context for the encounter (e.g. return policy, next chapter)
-        public static Game.World.EncounterContext EncounterContext;
+        public static Game.World.EncounterContext? EncounterContext;
 
         /// <summary>
         /// Clears the context. Call this when returning to the Map/Menu to ensure 

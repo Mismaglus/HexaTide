@@ -94,16 +94,13 @@ namespace Game.World
                 if (_hoveredCoords.HasValue)
                 {
                     _hoveredCoords = null;
-                    if (_plannedDestination == null)
+                    highlighter.SetHover(null);
+
+                    // Only clear visuals if we are NOT planning a move
+                    if (!_plannedDestination.HasValue)
                     {
                         highlighter.ClearVisuals();
                         if (outlineManager) outlineManager.Hide();
-
-                        if (_playerUnit != null)
-                        {
-                            var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
-                            if (uh) uh.SetHover(false);
-                        }
                     }
                 }
             }
@@ -111,59 +108,30 @@ namespace Game.World
 
         void OnHoverTile(HexCoords tile)
         {
-            if (_plannedDestination.HasValue) return;
+            highlighter.SetHover(tile);
 
-            highlighter.ClearVisuals();
-
-            if (outlineManager)
+            // If we are NOT planning, we can show outline or simple hover
+            if (!_plannedDestination.HasValue)
             {
-                outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
-            }
-
-            if (_playerUnit != null && !_playerUnit.Coords.Equals(tile))
-            {
-                var path = ChapterPathfinder.FindPath(_playerUnit.Coords, tile, grid);
-                if (path != null && path.Count > 0)
+                highlighter.ClearVisuals(); // Ensure no stale cursors
+                if (outlineManager)
                 {
-                    highlighter.ShowDestCursor(tile, $"{path.Count} Steps");
-                }
-            }
-
-            if (ChapterMapManager.Instance != null)
-            {
-                if (_playerUnit != null && _playerUnit.Coords.Equals(tile))
-                {
-                    var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
-                    if (uh) uh.SetHover(true);
-                }
-                else
-                {
-                    if (_playerUnit != null)
-                    {
-                        var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
-                        if (uh) uh.SetHover(false);
-                    }
+                    outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
                 }
             }
         }
 
         void OnLeftClick(HexCoords target)
         {
+            // If we clicked the same tile we planned for, execute
             if (_plannedDestination.HasValue && _plannedDestination.Value.Equals(target))
             {
                 ExecuteMove();
                 return;
             }
 
-            if (doubleClickToConfirm)
-            {
-                PlanMove(target);
-            }
-            else
-            {
-                PlanMove(target);
-                ExecuteMove();
-            }
+            // Otherwise, plan a new move
+            PlanMove(target);
         }
 
         void PlanMove(HexCoords target)
@@ -172,6 +140,7 @@ namespace Game.World
 
             if (ChapterMapManager.Instance == null) return;
 
+            // Check if nodes exist (optional safety)
             var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
             var endNode = ChapterMapManager.Instance.GetNodeAt(target);
 
@@ -192,10 +161,12 @@ namespace Game.World
             _plannedDestination = target;
             _currentPath = path;
 
+            // Visuals
             if (highlighter)
             {
                 highlighter.ClearVisuals();
                 highlighter.ShowDestCursor(target, $"{path.Count} Steps");
+                highlighter.SetSelected(target);
             }
         }
 
@@ -203,7 +174,11 @@ namespace Game.World
         {
             if (_currentPath == null || _currentPath.Count == 0) return;
 
+            // Clear visuals before moving
             highlighter.ClearVisuals();
+            highlighter.SetSelected(null);
+            highlighter.SetHover(null);
+
             _plannedDestination = null;
 
             _playerMover.FollowPath(_currentPath, OnMoveFinished);
@@ -213,11 +188,17 @@ namespace Game.World
         {
             _plannedDestination = null;
             _currentPath = null;
+
             highlighter.ClearVisuals();
+            highlighter.SetSelected(null);
+
             if (outlineManager) outlineManager.Hide();
         }
 
         void OnMoveFinished()
         {
+            // Optional: Auto-interact logic is handled by ChapterMapManager via UnitMover events usually, 
+            // or we can trigger something here.
+            // ChapterMapManager listens to OnMoveFinished on the UnitMover.
         }
     }

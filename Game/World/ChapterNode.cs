@@ -103,6 +103,7 @@ namespace Game.World
             // Trigger Logic
             if (specificEncounter != null)
             {
+                specificEncounter.Context = EncounterContext.Current;
                 specificEncounter.StartEncounter();
                 return;
             }
@@ -115,7 +116,7 @@ namespace Game.World
                 case ChapterNodeType.GateLeft:
                 case ChapterNodeType.GateRight:
                 case ChapterNodeType.GateSkip:
-                    TriggerGenericBattle();
+                    TriggerGenericBattle(EncounterContext.Current);
                     break;
 
                 case ChapterNodeType.Merchant:
@@ -131,11 +132,12 @@ namespace Game.World
             }
         }
 
-        void TriggerGenericBattle()
+        void TriggerGenericBattle(EncounterContext context)
         {
             var encounter = GetComponent<EncounterNode>();
             if (encounter == null) encounter = gameObject.AddComponent<EncounterNode>();
 
+            encounter.Context = context;
             // Note: EncounterNode.StartEncounter will load the Battle Scene
             encounter.StartEncounter();
         }

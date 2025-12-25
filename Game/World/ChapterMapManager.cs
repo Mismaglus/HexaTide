@@ -205,16 +205,16 @@ namespace Game.World
             if (topRowNodes.Count >= 3)
             {
                 // Left
-                topRowNodes[0].Initialize(ChapterNodeType.LeftGate);
+                topRowNodes[0].Initialize(ChapterNodeType.GateLeft);
                 // Right
-                topRowNodes[topRowNodes.Count - 1].Initialize(ChapterNodeType.RightGate);
+                topRowNodes[topRowNodes.Count - 1].Initialize(ChapterNodeType.GateRight);
                 // Center (Skip)
-                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.SkipGate);
+                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.GateSkip);
             }
             else if (topRowNodes.Count > 0)
             {
                 // Fallback if map is too narrow
-                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.SkipGate);
+                topRowNodes[topRowNodes.Count / 2].Initialize(ChapterNodeType.GateSkip);
             }
 
             var validCandidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();

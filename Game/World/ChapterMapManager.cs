@@ -29,6 +29,13 @@ namespace Game.World
         [Header("Act Settings")]
         public bool isAct1 = true; // Simple toggle for now to distinguish generation logic
 
+        [Header("Chapter Settings")]
+        [Tooltip("Optional settings database. If assigned, MapScene can load different chapters via FlowContext.CurrentChapterId.")]
+        public ChapterSettingsDB settingsDB;
+
+        [Tooltip("Fallback settings if DB lookup fails or FlowContext is empty.")]
+        public ChapterSettings defaultSettings;
+
         // Runtime State
         private int _currentSeed;
         private int _playerMoveCount = 0;
@@ -52,10 +59,10 @@ namespace Game.World
         void Awake()
         {
             Instance = this;
-            if (!grid) grid = FindFirstObjectByType<BattleHexGrid>();
+            if (!grid) grid = Object.FindFirstObjectByType<BattleHexGrid>();
 
             // Disable FogOfWarSystem in Chapter Scene
-            var fogSystem = FindFirstObjectByType<Game.Battle.FogOfWarSystem>();
+            var fogSystem = Object.FindFirstObjectByType<Game.Battle.FogOfWarSystem>();
             if (fogSystem != null)
             {
                 Debug.LogWarning("[ChapterMapManager] Disabling FogOfWarSystem in Chapter Scene.");
@@ -63,14 +70,37 @@ namespace Game.World
                 fogSystem.enabled = false;
             }
 
-            var highlighter = grid.GetComponent<Game.Common.HexHighlighter>();
+            var highlighter = grid != null ? grid.GetComponent<Game.Common.HexHighlighter>() : null;
             if (highlighter) highlighter.ignoreFog = true;
         }
 
         void Start()
         {
+            // Load and apply chapter settings BEFORE generating/restoring map.
+            var settings = LoadActiveSettings();
+            ApplySettings(settings);
+
+            // Ensure FlowContext has a stable chapter id for later SaveMapState().
+            if (settings != null && !string.IsNullOrEmpty(settings.chapterId))
+            {
+                FlowContext.CurrentChapterId = settings.chapterId;
+            }
+
             if (MapRuntimeData.HasData)
             {
+                // If we are returning from battle, prefer the saved chapter id.
+                if (!string.IsNullOrEmpty(MapRuntimeData.CurrentChapterId))
+                {
+                    FlowContext.CurrentChapterId = MapRuntimeData.CurrentChapterId;
+
+                    // Re-resolve settings if needed (for safety).
+                    var restoredSettings = ResolveSettingsById(MapRuntimeData.CurrentChapterId);
+                    if (restoredSettings != null)
+                    {
+                        ApplySettings(restoredSettings);
+                    }
+                }
+
                 RestoreMapState();
             }
             else
@@ -87,6 +117,51 @@ namespace Game.World
             if (_playerUnit != null && _playerUnit.TryGetComponent<UnitMover>(out var mover))
             {
                 mover.OnMoveFinished -= HandlePlayerMove;
+            }
+        }
+
+        // =========================================================
+        // Chapter Settings
+        // =========================================================
+
+        private ChapterSettings LoadActiveSettings()
+        {
+            // Priority:
+            // 1) Return from battle => MapRuntimeData.CurrentChapterId
+            // 2) Normal navigation => FlowContext.CurrentChapterId
+            // 3) Fallback => defaultSettings
+            string id = MapRuntimeData.HasData ? MapRuntimeData.CurrentChapterId : FlowContext.CurrentChapterId;
+
+            if (string.IsNullOrEmpty(id))
+            {
+                return defaultSettings;
+            }
+
+            var s = ResolveSettingsById(id);
+            return s != null ? s : defaultSettings;
+        }
+
+        private ChapterSettings ResolveSettingsById(string chapterId)
+        {
+            if (settingsDB == null) return null;
+            return settingsDB.GetSettings(chapterId);
+        }
+
+        private void ApplySettings(ChapterSettings settings)
+        {
+            if (settings == null) return;
+
+            isAct1 = settings.isAct1;
+            eliteCount = settings.eliteCount;
+            merchantCount = settings.merchantCount;
+            mysteryCount = settings.mysteryCount;
+
+            movesPerTideStep = settings.movesPerTideStep;
+            tideAnimationDelay = settings.tideAnimationDelay;
+
+            if (settings.gridRecipe != null)
+            {
+                mapRecipe = settings.gridRecipe;
             }
         }
 
@@ -123,7 +198,16 @@ namespace Game.World
 
         void GenerateGridGeometry(int seed)
         {
-            if (grid == null || mapRecipe == null) return;
+            if (grid == null)
+            {
+                Debug.LogError("[ChapterMapManager] grid is null.");
+                return;
+            }
+            if (mapRecipe == null)
+            {
+                Debug.LogError("[ChapterMapManager] mapRecipe is null. Assign a GridRecipe or use ChapterSettings.");
+                return;
+            }
 
             mapRecipe.randomSeed = seed;
             grid.Rebuild();
@@ -332,7 +416,14 @@ namespace Game.World
             {
                 HexCoords current = q.Dequeue();
                 if (_nodes.TryGetValue(current, out var node) && !node.GetComponent<HexCell>().IsFlooded) return current;
-                foreach (var n in current.Neighbors()) if (!visited.Contains(n) && _nodes.ContainsKey(n)) { visited.Add(n); q.Enqueue(n); }
+                foreach (var n in current.Neighbors())
+                {
+                    if (!visited.Contains(n) && _nodes.ContainsKey(n))
+                    {
+                        visited.Add(n);
+                        q.Enqueue(n);
+                    }
+                }
             }
             return origin;
         }

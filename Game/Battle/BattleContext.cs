@@ -1,6 +1,6 @@
 using UnityEngine;
 using Game.World; // 引用 EncounterContext
-
+using Game.Inventory;
 namespace Game.Battle
 {
     /// <summary>
@@ -11,10 +11,12 @@ namespace Game.Battle
     {
         // 使用 Nullable，如果是 null 说明是直接在这个场景运行 debug，或者没有前置上下文
         public static EncounterContext? EncounterContext;
+        public static LootTableSO ActiveLootTable;
 
         public static void Reset()
         {
             EncounterContext = null;
+            ActiveLootTable = null;
             // 如果未来有其他战斗临时数据（如累计伤害等），也在这里重置
         }
     }

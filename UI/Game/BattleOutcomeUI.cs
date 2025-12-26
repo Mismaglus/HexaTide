@@ -8,7 +8,6 @@ using Game.World;
 using Game.Inventory;
 using Game.Units;
 using Game.UI.Inventory;
-using System.Collections.Generic;
 using System.Linq;
 
 namespace Game.UI
@@ -52,12 +51,10 @@ namespace Game.UI
         private BattleStateMachine _battleSM;
         private BattleRewardResult _cachedResult;
 
-        // Track if we have already displayed the result to prevent repeated calls in Update
         private bool _hasShownOutcome = false;
 
         void Awake()
         {
-            // Ensure we start clean, but keep THIS script's GameObject active to run Update()
             if (victoryPanel) victoryPanel.SetActive(false);
             if (defeatPanel) defeatPanel.SetActive(false);
 
@@ -65,28 +62,26 @@ namespace Game.UI
             if (defeatRetryBtn) defeatRetryBtn.onClick.AddListener(OnDefeatRetry);
             if (defeatQuitBtn) defeatQuitBtn.onClick.AddListener(OnDefeatQuit);
 
-            if (!tooltipController) tooltipController = FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
+            if (!tooltipController)
+                tooltipController = Object.FindFirstObjectByType<SkillTooltipController>(FindObjectsInactive.Include);
         }
 
         void Start()
         {
-            _battleSM = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Include);
-
-            // Note: We primarily rely on Update() polling now for safety, but Events are okay too.
+            _battleSM = BattleStateMachine.Instance
+                ?? Object.FindFirstObjectByType<BattleStateMachine>(FindObjectsInactive.Include);
         }
 
-        // ⭐ ROBUSTNESS: Check State every frame. 
-        // This solves the issue where OnVictory event fires before this UI is ready/subscribed.
         void Update()
         {
             if (_hasShownOutcome) return;
+
             if (_battleSM == null)
             {
                 _battleSM = BattleStateMachine.Instance;
                 return;
             }
 
-            // Check State Machine
             if (_battleSM.State == BattleState.Victory)
             {
                 ShowVictoryPanel();
@@ -107,14 +102,12 @@ namespace Game.UI
             {
                 victoryPanel.SetActive(true);
 
-                // Force Visual Properties in case they were stuck
                 CanvasGroup cg = victoryPanel.GetComponent<CanvasGroup>();
                 if (cg == null) cg = victoryPanel.AddComponent<CanvasGroup>();
                 cg.alpha = 1f;
                 cg.blocksRaycasts = true;
                 cg.interactable = true;
 
-                // Bring to front
                 victoryPanel.transform.SetAsLastSibling();
             }
             else
@@ -122,11 +115,9 @@ namespace Game.UI
                 Debug.LogError("[BattleOutcomeUI] Victory Panel reference missing!");
             }
 
-            // Reset Texts
             if (descriptionText) descriptionText.text = defaultHint;
             if (flavorText) flavorText.text = "";
 
-            // Populate Data
             if (_battleSM != null && _battleSM.Rewards != null)
             {
                 _cachedResult = _battleSM.Rewards;
@@ -161,11 +152,9 @@ namespace Game.UI
         {
             if (rewards == null) return;
 
-            // 1. Show Currency
             if (labelGold) labelGold.text = $"{rewards.gold} G";
             if (labelExp) labelExp.text = $"{rewards.experience} XP";
 
-            // 2. Spawn Items
             if (lootContainer && lootSlotPrefab)
             {
                 foreach (Transform child in lootContainer) Destroy(child.gameObject);
@@ -181,21 +170,17 @@ namespace Game.UI
                     }
                 }
 
-                // Force Layout Rebuild to fix Unity UI 0-size bugs on first frame
                 Canvas.ForceUpdateCanvases();
                 LayoutRebuilder.ForceRebuildLayoutImmediate(lootContainer as RectTransform);
             }
         }
 
-        // Callback from LootSlotUI
         void OnItemClicked(InventoryItem item)
         {
             if (item == null) return;
 
-            // Update Description
             if (descriptionText) descriptionText.text = item.GetDynamicDescription(null);
 
-            // Update Flavor
             if (flavorText)
             {
                 if (item is ConsumableItem c && c.abilityToCast != null)
@@ -208,77 +193,63 @@ namespace Game.UI
                 }
             }
         }
+
         void OnVictoryContinue()
         {
             ClaimRewards();
 
-            // Check Encounter Context for Return Policy
             var context = BattleContext.EncounterContext;
 
             if (context.HasValue && context.Value.policy == ReturnPolicy.ExitChapter)
             {
                 var exitContext = context.Value;
-                var destination = exitContext.nextChapterId;
 
-                if (string.IsNullOrEmpty(destination))
+                var destinationChapterId = exitContext.nextChapterId;
+                if (string.IsNullOrEmpty(destinationChapterId))
                 {
                     switch (exitContext.gateKind)
                     {
                         case GateKind.SkipGate:
-                            destination = "Act3_StarreachPeak";
+                            destinationChapterId = "Act3_StarreachPeak";
                             break;
                         case GateKind.LeftGate:
-                            destination = "Act2_LeftBiome";
+                            destinationChapterId = "Act2_LeftBiome";
                             break;
                         case GateKind.RightGate:
-                            destination = "Act2_RightBiome";
+                            destinationChapterId = "Act2_RightBiome";
                             break;
                     }
                 }
 
-                Debug.Log($"[BattleOutcome] Exiting Chapter via {exitContext.gateKind}. Destination: {destination}");
+                Debug.Log($"[BattleOutcome] ExitChapter via {exitContext.gateKind}. Next ChapterId: {destinationChapterId}");
 
-                // Clear Map Data as we are leaving the chapter
                 MapRuntimeData.Clear();
 
-                // Load Next Scene
-                if (!string.IsNullOrEmpty(destination))
+                if (!string.IsNullOrEmpty(destinationChapterId))
                 {
-                    SceneManager.LoadScene(destination);
-                }
-                else
-                {
-                    Debug.LogError("[BattleOutcome] ExitChapter policy set but no destination provided!");
-                    SceneManager.LoadScene("MainMenu"); // Fallback
+                    FlowContext.CurrentChapterId = destinationChapterId;
                 }
 
-                // Reset Context
                 BattleContext.Reset();
+                SceneManager.LoadScene("MapScene");
                 return;
             }
 
-            // Default: Return to Chapter
-            // ⭐ 1. Mark the current node as cleared in our persistent data
             if (MapRuntimeData.HasData)
             {
-                // We clear the node where the player currently stands
                 MapRuntimeData.ClearedNodes.Add(MapRuntimeData.PlayerPosition);
-                Debug.Log($"[BattleOutcome] Node at {MapRuntimeData.PlayerPosition} marked as cleared.");
+
+                if (!string.IsNullOrEmpty(MapRuntimeData.CurrentChapterId))
+                    FlowContext.CurrentChapterId = MapRuntimeData.CurrentChapterId;
             }
 
-            // ⭐ 2. Return to the Map Scene
-            // Make sure "MapScene" is added to your Build Settings!
-            SceneManager.LoadScene("MapScene");
-
-            // Reset Context
             BattleContext.Reset();
+            SceneManager.LoadScene("MapScene");
         }
 
         void OnDefeatRetry()
         {
             Debug.Log("[BattleOutcomeUI] Retry clicked. Reloading scene...");
-            // Keep context active for retry? Or clear? 
-            // Usually retry implies same battle settings, so we might NOT clear context here.
             SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
 
@@ -293,18 +264,14 @@ namespace Game.UI
         {
             if (_cachedResult == null) return;
 
-            // Find Player Inventory
             UnitInventory playerInventory = null;
 
-            // Method 1: Ask SM
             if (_battleSM != null && _battleSM.PlayerUnits.Count > 0)
             {
-                // Note: The player unit might be null if they died, but usually 1 persists or we grab from roster
                 var p = _battleSM.PlayerUnits.FirstOrDefault(u => u != null);
                 if (p) playerInventory = p.GetComponent<UnitInventory>();
             }
 
-            // Method 2: Fallback search
             if (playerInventory == null)
             {
                 var p = FindObjectsByType<BattleUnit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
@@ -326,7 +293,6 @@ namespace Game.UI
                 Debug.LogError("[BattleOutcomeUI] Could not find Player UnitInventory to claim rewards!");
             }
 
-            // Claim Currency
             if (_cachedResult.gold > 0) Debug.Log($"[Wallet] Added {_cachedResult.gold} Gold (System not connected).");
             if (_cachedResult.experience > 0) Debug.Log($"[Progression] Added {_cachedResult.experience} EXP (System not connected).");
         }

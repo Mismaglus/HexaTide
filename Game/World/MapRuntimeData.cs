@@ -14,6 +14,9 @@ namespace Game.World
         // Generation Info (to rebuild the same map)
         public static int MapSeed;
 
+        // Keep track of which chapter this runtime data belongs to.
+        public static string CurrentChapterId;
+
         // Dynamic State
         public static HexCoords PlayerPosition;
         public static int CurrentTideRow;
@@ -22,12 +25,24 @@ namespace Game.World
         // Progress
         public static HashSet<HexCoords> ClearedNodes = new HashSet<HexCoords>();
 
+        /// <summary>
+        /// Saves the runtime state and associates it with the current FlowContext.CurrentChapterId.
+        /// </summary>
         public static void Save(int seed, HexCoords playerPos, int tideRow, int moves, List<HexCoords> cleared)
+        {
+            Save(seed, playerPos, tideRow, moves, cleared, FlowContext.CurrentChapterId);
+        }
+
+        /// <summary>
+        /// Saves the runtime state and associates it with the given chapterId.
+        /// </summary>
+        public static void Save(int seed, HexCoords playerPos, int tideRow, int moves, List<HexCoords> cleared, string chapterId)
         {
             MapSeed = seed;
             PlayerPosition = playerPos;
             CurrentTideRow = tideRow;
             MovesTaken = moves;
+            CurrentChapterId = chapterId;
 
             ClearedNodes.Clear();
             if (cleared != null)
@@ -36,13 +51,14 @@ namespace Game.World
             }
 
             HasData = true;
-            Debug.Log($"[MapData] Saved state. Player at {PlayerPosition}, Tide Row {CurrentTideRow}, Cleared {ClearedNodes.Count}");
+            Debug.Log($"[MapData] Saved state. Player at {PlayerPosition}, Tide Row {CurrentTideRow}, Cleared {ClearedNodes.Count}, Chapter {CurrentChapterId}");
         }
 
         public static void Clear()
         {
             HasData = false;
             ClearedNodes.Clear();
+            CurrentChapterId = null;
         }
     }
 }

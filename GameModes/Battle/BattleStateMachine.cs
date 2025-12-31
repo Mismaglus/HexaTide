@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Game.Inventory;
+using Game.World;
 
 namespace Game.Battle
 {
@@ -35,11 +36,18 @@ namespace Game.Battle
         [SerializeField] private bool autoStart = true;
         [SerializeField] private TurnSide startingSide = TurnSide.Player;
 
+        [Header("Rewards (Profiles)")]
+        [Tooltip("DB for RewardProfileSO lookup via EncounterContext.rewardProfileId. Optional but recommended.")]
+        [SerializeField] private RewardProfileDB rewardProfileDB;
+
+        [Tooltip("Default reward profile used when context id is missing or not found. Optional.")]
+        [SerializeField] private RewardProfileSO defaultRewardProfile;
+
         [Header("Rewards (Fallback)")]
-        [Tooltip("Default loot table used if BattleContext.ActiveLootTable is null.")]
+        [Tooltip("Default loot table used if no profile is resolved and BattleContext.ActiveLootTable is null.")]
         [SerializeField] private LootTableSO defaultLootTable;
 
-        // ⭐ Public State for UI Polling
+        // Public State for UI Polling
         public BattleState State { get; private set; } = BattleState.Playing;
 
         public TurnSide CurrentTurn { get; private set; } = TurnSide.Player;
@@ -63,7 +71,7 @@ namespace Game.Battle
         void Awake()
         {
             Instance = this;
-            State = BattleState.Playing; // Reset state on load
+            State = BattleState.Playing;
 
             if (rules == null)
                 rules = GetComponentInParent<BattleRules>() ?? FindFirstObjectByType<BattleRules>(FindObjectsInactive.Exclude);
@@ -76,11 +84,31 @@ namespace Game.Battle
 
         void Start()
         {
-            // Debug Log for Loot Table
+            // Debug log: what reward source will likely be used
             if (BattleContext.ActiveLootTable != null)
-                Debug.Log($"[BattleSM] Context Loot Table Active: {BattleContext.ActiveLootTable.name}");
-            else if (defaultLootTable != null)
-                Debug.Log($"[BattleSM] Default Loot Table Active: {defaultLootTable.name}");
+            {
+                Debug.Log($"[BattleSM] Context LootTable Override Active: {BattleContext.ActiveLootTable.name}");
+            }
+            else if (BattleContext.ActiveRewardProfile != null)
+            {
+                Debug.Log($"[BattleSM] Context RewardProfile Override Active: {BattleContext.ActiveRewardProfile.name}");
+            }
+            else
+            {
+                var ctx = BattleContext.EncounterContext;
+                if (ctx.HasValue && !string.IsNullOrEmpty(ctx.Value.rewardProfileId))
+                {
+                    Debug.Log($"[BattleSM] EncounterContext rewardProfileId: {ctx.Value.rewardProfileId}");
+                }
+                else if (defaultRewardProfile != null)
+                {
+                    Debug.Log($"[BattleSM] Default RewardProfile Active: {defaultRewardProfile.name}");
+                }
+                else if (defaultLootTable != null)
+                {
+                    Debug.Log($"[BattleSM] Default LootTable Active: {defaultLootTable.name}");
+                }
+            }
 
             if (autoStart)
                 BeginTurn(startingSide, notifyActors: true);
@@ -159,7 +187,6 @@ namespace Game.Battle
 
         public void OnUnitDied(BattleUnit unit)
         {
-            // If battle already ended, ignore deaths
             if (State != BattleState.Playing) return;
 
             if (unit.isPlayer) _playerUnits.Remove(unit);
@@ -182,14 +209,14 @@ namespace Game.Battle
 
             if (!hasRealPlayerCharacter)
             {
-                EndBattle(false); // Defeat
+                EndBattle(false);
                 return;
             }
 
             // Victory: No enemies left
             if (_enemyUnits.Count == 0)
             {
-                EndBattle(true); // Victory
+                EndBattle(true);
                 return;
             }
         }
@@ -204,35 +231,87 @@ namespace Game.Battle
 
             if (playerWon)
             {
-                Debug.Log("🏆 VICTORY!");
+                Debug.Log("[BattleSM] Victory.");
                 CalculateRewards();
-                // 3. Fire Events (for listeners already active)
                 OnVictory?.Invoke();
             }
             else
             {
-                Debug.Log("☠️ DEFEAT!");
+                Debug.Log("[BattleSM] Defeat.");
                 OnDefeat?.Invoke();
             }
         }
 
         private void CalculateRewards()
         {
-            // 1. Prioritize Context
-            LootTableSO tableToUse = BattleContext.ActiveLootTable;
+            // Priority:
+            // 1) BattleContext.ActiveLootTable (debug override)
+            // 2) BattleContext.ActiveRewardProfile (debug override)
+            // 3) EncounterContext.rewardProfileId -> RewardProfileDB
+            // 4) defaultRewardProfile
+            // 5) defaultLootTable
+            // 6) none
 
-            // 2. Fallback
-            if (tableToUse == null) tableToUse = defaultLootTable;
+            // 1) Debug LootTable override
+            LootTableSO tableOverride = BattleContext.ActiveLootTable;
+            if (tableOverride != null)
+            {
+                Rewards = tableOverride.GenerateRewards();
+                Debug.Log($"[BattleSM] Rewards via ActiveLootTable: {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
+                return;
+            }
 
+            // 2) Debug RewardProfile override
+            RewardProfileSO profileOverride = BattleContext.ActiveRewardProfile;
+            if (profileOverride != null)
+            {
+                Rewards = profileOverride.GenerateRewards();
+                Debug.Log($"[BattleSM] Rewards via ActiveRewardProfile: {profileOverride.name} -> {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
+                return;
+            }
+
+            // 3) EncounterContext profile id
+            RewardProfileSO profileToUse = null;
+
+            var ctx = BattleContext.EncounterContext;
+            if (ctx.HasValue && !string.IsNullOrEmpty(ctx.Value.rewardProfileId))
+            {
+                if (rewardProfileDB != null)
+                {
+                    profileToUse = rewardProfileDB.GetProfile(ctx.Value.rewardProfileId);
+                    if (profileToUse == null)
+                    {
+                        Debug.LogWarning($"[BattleSM] rewardProfileId '{ctx.Value.rewardProfileId}' not found in RewardProfileDB. Falling back.");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[BattleSM] RewardProfileDB is null but EncounterContext.rewardProfileId is set. Falling back.");
+                }
+            }
+
+            // 4) Default profile
+            if (profileToUse == null)
+                profileToUse = defaultRewardProfile;
+
+            if (profileToUse != null)
+            {
+                Rewards = profileToUse.GenerateRewards();
+                Debug.Log($"[BattleSM] Rewards via RewardProfile: {profileToUse.name} -> {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
+                return;
+            }
+
+            // 5) Fallback LootTable
+            LootTableSO tableToUse = defaultLootTable;
             if (tableToUse != null)
             {
                 Rewards = tableToUse.GenerateRewards();
-                Debug.Log($"[BattleStateMachine] Rewards Generated: {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
+                Debug.Log($"[BattleSM] Rewards via DefaultLootTable: {Rewards.gold}g, {Rewards.experience}xp, {Rewards.items.Count} items.");
             }
             else
             {
                 Rewards = new BattleRewardResult();
-                Debug.LogWarning("[BattleStateMachine] No LootTable configured. No rewards generated.");
+                Debug.LogWarning("[BattleSM] No reward source configured. No rewards generated.");
             }
         }
 
@@ -302,7 +381,7 @@ namespace Game.Battle
             }
 
             OnTurnChanged?.Invoke(CurrentTurn);
-            Debug.Log($"⚡ Turn Start: {side}");
+            Debug.Log($"[BattleSM] Turn Start: {side}");
         }
 
         void EndCurrentTurn(TurnSide side)

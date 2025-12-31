@@ -1,23 +1,35 @@
-using UnityEngine;
-using Game.World; // 引用 EncounterContext
 using Game.Inventory;
+
 namespace Game.Battle
 {
     /// <summary>
-    /// Holds static runtime data for the current battle session.
-    /// Acts as a bridge between the Chapter Map and the Battle Scene.
+    /// 静态类，在战斗各阶段存储跨系统共享的上下文。
     /// </summary>
     public static class BattleContext
     {
-        // 使用 Nullable，如果是 null 说明是直接在这个场景运行 debug，或者没有前置上下文
-        public static EncounterContext? EncounterContext;
-        public static LootTableSO ActiveLootTable;
+        /// <summary>
+        /// 当前战斗关联的 EncounterContext，可为空。
+        /// </summary>
+        public static Game.World.EncounterContext? EncounterContext { get; set; }
 
+        /// <summary>
+        /// 调试用：直接指定使用哪个 LootTableSO 覆盖。设置后优先使用。
+        /// </summary>
+        public static LootTableSO ActiveLootTable { get; set; }
+
+        /// <summary>
+        /// 调试用：直接指定使用哪个 RewardProfileSO 覆盖。优先级高于 rewardProfileId。
+        /// </summary>
+        public static RewardProfileSO ActiveRewardProfile { get; set; }
+
+        /// <summary>
+        /// 清空战斗上下文。通常在加载新战斗或战斗结束时调用。
+        /// </summary>
         public static void Reset()
         {
             EncounterContext = null;
             ActiveLootTable = null;
-            // 如果未来有其他战斗临时数据（如累计伤害等），也在这里重置
+            ActiveRewardProfile = null;
         }
     }
 }

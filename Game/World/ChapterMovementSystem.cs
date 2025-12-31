@@ -122,42 +122,32 @@ namespace Game.World
 
         void OnHoverTile(HexCoords tile)
         {
-            // If we have a plan locked in, don't update highlights based on hover
             if (_plannedDestination.HasValue) return;
-
-            // In Chapter Mode, we usually just show the cursor on click, 
-            // but if we want hover feedback, we could show a basic cursor.
-            // For now, let's keep it clean: simple tile highlight + Unit Highlight.
-
-            // Note: We use SetHover (tile color) but we DON'T show the destination cursor yet.
-            // Destination cursor is shown in PlanMove (on Click).
 
             highlighter.SetHover(tile);
 
-            // Show outline if available
             if (outlineManager)
-            {
                 outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
-            }
 
-            // Unit Highlight Logic
-            if (ChapterMapManager.Instance != null)
+            if (!_playerUnit.Coords.Equals(tile))
             {
-                if (_playerUnit != null && _playerUnit.Coords.Equals(tile))
+                var path = ChapterPathfinder.FindPath(_playerUnit.Coords, tile, grid);
+                if (path != null && path.Count > 0)
                 {
-                    var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
-                    if (uh) uh.SetHover(true);
+                    highlighter.ShowPath(path);
+                    highlighter.ShowDestCursor(tile, $"{path.Count} Steps");
                 }
                 else
                 {
-                    if (_playerUnit != null)
-                    {
-                        var uh = _playerUnit.GetComponentInChildren<UnitHighlighter>();
-                        if (uh) uh.SetHover(false);
-                    }
+                    highlighter.ClearVisuals();
                 }
             }
+            else
+            {
+                highlighter.ClearVisuals();
+            }
         }
+
 
         void OnLeftClick(HexCoords target)
         {

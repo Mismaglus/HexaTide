@@ -20,7 +20,6 @@ namespace Game.EditorTools
         // --- Scene Data ---
         private Vector2 _sceneScrollPos;
         private List<string> _scenePaths = new List<string>();
-        // ⭐ CONFIG: The folder to search for scenes
         private const string SCENE_SEARCH_FOLDER = "Assets/_Scenes";
 
         // --- Inventory Data ---
@@ -33,6 +32,7 @@ namespace Game.EditorTools
 
         // --- Battle Setup Data ---
         private LootTableSO _selectedLootTable;
+        private RewardProfileSO _selectedRewardProfile;
 
         // Shortcuts: Ctrl+G (General Debug)
         [MenuItem("Tools/HexaTide/Game Debugger %g")]
@@ -58,7 +58,6 @@ namespace Game.EditorTools
         {
             GUILayout.Space(10);
 
-            // Header Style
             GUIStyle headerStyle = new GUIStyle(EditorStyles.boldLabel)
             {
                 fontSize = 16,
@@ -68,10 +67,8 @@ namespace Game.EditorTools
             GUILayout.Label("HEXATIDE DEBUGGER", headerStyle);
             GUILayout.Space(10);
 
-            // Main Tabs
             _mainTab = GUILayout.Toolbar(_mainTab, _mainTabs, GUILayout.Height(30));
 
-            // Horizontal Line
             Rect r = EditorGUILayout.GetControlRect(false, 2);
             EditorGUI.DrawRect(r, Color.gray);
             GUILayout.Space(10);
@@ -91,10 +88,8 @@ namespace Game.EditorTools
         {
             _scenePaths.Clear();
 
-            // ⭐ Validate folder exists to prevent errors
             if (!AssetDatabase.IsValidFolder(SCENE_SEARCH_FOLDER))
             {
-                // Fallback: If folder doesn't exist, search everywhere but warn
                 Debug.LogWarning($"[GameDebugger] Folder '{SCENE_SEARCH_FOLDER}' not found. Showing all scenes in Assets/.");
                 string[] allGuids = AssetDatabase.FindAssets("t:Scene");
                 foreach (string guid in allGuids)
@@ -105,7 +100,6 @@ namespace Game.EditorTools
                 return;
             }
 
-            // ⭐ Search specifically in the requested folder
             string[] guids = AssetDatabase.FindAssets("t:Scene", new[] { SCENE_SEARCH_FOLDER });
             foreach (string guid in guids)
             {
@@ -134,7 +128,6 @@ namespace Game.EditorTools
             {
                 string sceneName = Path.GetFileNameWithoutExtension(path);
 
-                // Highlight current scene
                 string currentPath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path;
                 bool isCurrent = currentPath == path;
 
@@ -143,7 +136,7 @@ namespace Game.EditorTools
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
                 GUILayout.Label(sceneName, EditorStyles.boldLabel, GUILayout.Width(150));
-                GUILayout.Label(Path.GetFileName(Path.GetDirectoryName(path)), EditorStyles.miniLabel); // Subfolder name
+                GUILayout.Label(Path.GetFileName(Path.GetDirectoryName(path)), EditorStyles.miniLabel);
 
                 if (GUILayout.Button("Open", GUILayout.Width(60)))
                 {
@@ -212,29 +205,76 @@ namespace Game.EditorTools
 
             // Loot Table Injection
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Next Battle Loot:", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("Next Battle LootTable Override (Highest Priority)", EditorStyles.miniBoldLabel);
             _selectedLootTable = (LootTableSO)EditorGUILayout.ObjectField("Loot Table", _selectedLootTable, typeof(LootTableSO), false);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Inject Loot Table"))
+            if (GUILayout.Button("Inject LootTable"))
             {
                 BattleContext.ActiveLootTable = _selectedLootTable;
-                Debug.Log($"[Debugger] Injected Loot Table: {(_selectedLootTable ? _selectedLootTable.name : "NULL")}");
+                BattleContext.ActiveRewardProfile = null;
+                Debug.Log($"[Debugger] Injected LootTable: {(_selectedLootTable ? _selectedLootTable.name : "NULL")} (cleared ActiveRewardProfile)");
             }
-            if (GUILayout.Button("Clear Context"))
+            if (GUILayout.Button("Clear LootTable"))
             {
-                BattleContext.Reset();
-                Debug.Log("[Debugger] Battle Context Reset.");
+                BattleContext.ActiveLootTable = null;
+                Debug.Log("[Debugger] Cleared ActiveLootTable.");
             }
             EditorGUILayout.EndHorizontal();
+            GUILayout.EndVertical();
+
+            // Reward Profile Injection
+            GUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Next Battle RewardProfile Override (Second Priority)", EditorStyles.miniBoldLabel);
+            _selectedRewardProfile = (RewardProfileSO)EditorGUILayout.ObjectField("Reward Profile", _selectedRewardProfile, typeof(RewardProfileSO), false);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Inject RewardProfile"))
+            {
+                BattleContext.ActiveRewardProfile = _selectedRewardProfile;
+                BattleContext.ActiveLootTable = null;
+                Debug.Log($"[Debugger] Injected RewardProfile: {(_selectedRewardProfile ? _selectedRewardProfile.name : "NULL")} (cleared ActiveLootTable)");
+            }
+            if (GUILayout.Button("Clear RewardProfile"))
+            {
+                BattleContext.ActiveRewardProfile = null;
+                Debug.Log("[Debugger] Cleared ActiveRewardProfile.");
+            }
+            EditorGUILayout.EndHorizontal();
+            GUILayout.EndVertical();
+
+            // Full context reset
+            GUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Context Utilities", EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("Clear Context (BattleContext.Reset)"))
+            {
+                BattleContext.Reset();
+                Debug.Log("[Debugger] BattleContext.Reset called.");
+            }
+            GUILayout.EndVertical();
 
             // Status Display
-            if (Application.isPlaying)
+            GUILayout.Space(5);
+            GUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Current Context Status", EditorStyles.miniBoldLabel);
+
+            string lootStatus = BattleContext.ActiveLootTable != null ? BattleContext.ActiveLootTable.name : "None";
+            string profileStatus = BattleContext.ActiveRewardProfile != null ? BattleContext.ActiveRewardProfile.name : "None";
+
+            EditorGUILayout.LabelField($"ActiveLootTable: {lootStatus}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"ActiveRewardProfile: {profileStatus}", EditorStyles.miniLabel);
+
+            var ctx = BattleContext.EncounterContext;
+            if (ctx.HasValue)
             {
-                var current = BattleContext.ActiveLootTable;
-                string status = current != null ? current.name : "None (Using Scene Default)";
-                EditorGUILayout.LabelField($"Active Context: {status}", EditorStyles.miniLabel);
+                string rid = string.IsNullOrEmpty(ctx.Value.rewardProfileId) ? "None" : ctx.Value.rewardProfileId;
+                EditorGUILayout.LabelField($"EncounterContext.rewardProfileId: {rid}", EditorStyles.miniLabel);
             }
+            else
+            {
+                EditorGUILayout.LabelField("EncounterContext: None", EditorStyles.miniLabel);
+            }
+
             GUILayout.EndVertical();
         }
 
@@ -245,7 +285,6 @@ namespace Game.EditorTools
         {
             UnitInventory target = FindPlayerInventory();
 
-            // Target Display
             if (target != null)
             {
                 GUI.color = Color.green;
@@ -262,17 +301,14 @@ namespace Game.EditorTools
 
             GUILayout.Space(5);
 
-            // Search Bar
             EditorGUILayout.BeginHorizontal();
             _searchQuery = EditorGUILayout.TextField("Search", _searchQuery);
             if (GUILayout.Button("Refresh Data", GUILayout.Width(100))) RefreshInventoryDatabase();
             EditorGUILayout.EndHorizontal();
 
-            // Sub-Tabs
             _invCategoryTab = GUILayout.Toolbar(_invCategoryTab, _invCategoryNames);
             GUILayout.Space(5);
 
-            // Item Grid
             string currentCategory = _invCategoryNames[_invCategoryTab];
             if (_categorizedItems.ContainsKey(currentCategory))
             {
@@ -290,11 +326,9 @@ namespace Game.EditorTools
             {
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
-                // Icon
                 Texture2D icon = item.icon != null ? item.icon.texture : Texture2D.whiteTexture;
                 GUILayout.Label(icon, GUILayout.Width(32), GUILayout.Height(32));
 
-                // Info
                 EditorGUILayout.BeginVertical();
                 GUILayout.Label(item.name, EditorStyles.boldLabel);
                 GUILayout.Label(item.type.ToString(), EditorStyles.miniLabel);
@@ -302,7 +336,6 @@ namespace Game.EditorTools
 
                 GUILayout.FlexibleSpace();
 
-                // Buttons
                 GUI.enabled = target != null && Application.isPlaying;
                 if (GUILayout.Button("+1", GUILayout.Width(40), GUILayout.Height(30)))
                 {

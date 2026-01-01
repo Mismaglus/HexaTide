@@ -40,6 +40,11 @@ namespace Game.Common
         public GameObject pathNodePrefab;
         public GameObject costLabelPrefab;
 
+        [Header("Path Number Visuals")]
+        public StepNumberPrefabSet stepNumberPrefabs;
+        public float stepNumberSpacing = 0.4f;
+        public Vector3 stepNumberOffset = new Vector3(0f, 0.01f, 0f);
+
         [Header("Intensity")]
         [Range(0.1f, 4f)] public float hoverIntensity = 1.0f;
         [Range(0.1f, 4f)] public float selectedIntensity = 1.0f;
@@ -88,6 +93,10 @@ namespace Game.Common
         private GameObject _currentLabel;
         private List<GameObject> _activePathNodes = new List<GameObject>();
         private Queue<GameObject> _pathNodePool = new Queue<GameObject>();
+        private GameObject _currentNumberRoot;
+        private readonly List<GameObject> _activeNumberDigits = new List<GameObject>();
+        private readonly List<int> _activeDigitValues = new List<int>();
+        private readonly Dictionary<int, Queue<GameObject>> _digitPools = new Dictionary<int, Queue<GameObject>>();
 
         void Awake() { if (_mpb == null) _mpb = new MaterialPropertyBlock(); }
 
@@ -466,10 +475,18 @@ namespace Game.Common
             }
 
             // 2. Label
+            if (TryShowStepNumberLabel(labelText, pos))
+            {
+                if (_currentLabel) _currentLabel.SetActive(false);
+                return;
+            }
+
+            ClearNumberLabel();
+
             if (costLabelPrefab)
             {
                 if (!_currentLabel) _currentLabel = Instantiate(costLabelPrefab, transform);
-                _currentLabel.transform.position = pos + Vector3.up * 1.5f; // Float above
+                _currentLabel.transform.position = pos + Vector3.up * 0.01f; // Center on cursor with slight lift
                 _currentLabel.SetActive(true);
 
                 // Try setting text on various components
@@ -480,6 +497,10 @@ namespace Game.Common
                     var uiText = _currentLabel.GetComponentInChildren<UnityEngine.UI.Text>();
                     if (uiText) uiText.text = labelText;
                 }
+            }
+            else if (_currentLabel)
+            {
+                _currentLabel.SetActive(false);
             }
         }
 
@@ -520,6 +541,8 @@ namespace Game.Common
                 {
                     node.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
                 }
+                var euler = node.transform.rotation.eulerAngles;
+                node.transform.rotation = Quaternion.Euler(90f, euler.y, euler.z);
 
                 node.SetActive(true);
                 _activePathNodes.Add(node);
@@ -530,6 +553,7 @@ namespace Game.Common
         {
             if (_currentCursor) _currentCursor.SetActive(false);
             if (_currentLabel) _currentLabel.SetActive(false);
+            ClearNumberLabel();
 
             foreach (var node in _activePathNodes)
             {
@@ -546,6 +570,115 @@ namespace Game.Common
                 return _pathNodePool.Dequeue();
             }
             return Instantiate(pathNodePrefab, transform);
+        }
+
+        bool TryShowStepNumberLabel(string labelText, Vector3 worldPos)
+        {
+            if (!stepNumberPrefabs) return false;
+            if (!int.TryParse(labelText, out int value)) return false;
+            if (value < 0) value = 0;
+            if (value > 99) return false;
+
+            int tens = value / 10;
+            int ones = value % 10;
+
+            if (value >= 10)
+            {
+                if (!stepNumberPrefabs.TryGetDigitPrefab(tens, out var tensPrefab)) return false;
+                if (!stepNumberPrefabs.TryGetDigitPrefab(ones, out var onesPrefab)) return false;
+                ShowNumberDigits(worldPos, tens, tensPrefab, ones, onesPrefab);
+            }
+            else
+            {
+                if (!stepNumberPrefabs.TryGetDigitPrefab(ones, out var onesPrefab)) return false;
+                ShowNumberDigits(worldPos, ones, onesPrefab);
+            }
+
+            return true;
+        }
+
+        void ShowNumberDigits(Vector3 worldPos, int firstDigit, GameObject firstPrefab, int? secondDigit = null, GameObject secondPrefab = null)
+        {
+            EnsureNumberRoot(worldPos + stepNumberOffset);
+            RecycleActiveNumberDigits();
+
+            if (secondDigit.HasValue && secondPrefab != null)
+            {
+                float halfSpacing = stepNumberSpacing * 0.5f;
+                SpawnDigit(firstDigit, firstPrefab, new Vector3(-halfSpacing, 0f, 0f));
+                SpawnDigit(secondDigit.Value, secondPrefab, new Vector3(halfSpacing, 0f, 0f));
+            }
+            else
+            {
+                SpawnDigit(firstDigit, firstPrefab, Vector3.zero);
+            }
+        }
+
+        void EnsureNumberRoot(Vector3 worldPos)
+        {
+            if (!_currentNumberRoot)
+            {
+                _currentNumberRoot = new GameObject("StepNumberRoot");
+                _currentNumberRoot.transform.SetParent(transform, false);
+            }
+
+            _currentNumberRoot.transform.position = worldPos;
+            _currentNumberRoot.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            _currentNumberRoot.SetActive(true);
+        }
+
+        void SpawnDigit(int digit, GameObject prefab, Vector3 localPos)
+        {
+            if (!prefab || !_currentNumberRoot) return;
+
+            var obj = GetDigitInstance(digit, prefab);
+            obj.transform.SetParent(_currentNumberRoot.transform, false);
+            obj.transform.localPosition = localPos;
+            obj.transform.localRotation = Quaternion.Euler(0f, -180f, 0f);
+            obj.SetActive(true);
+
+            _activeNumberDigits.Add(obj);
+            _activeDigitValues.Add(digit);
+        }
+
+        GameObject GetDigitInstance(int digit, GameObject prefab)
+        {
+            if (!_digitPools.TryGetValue(digit, out var pool))
+            {
+                pool = new Queue<GameObject>();
+                _digitPools[digit] = pool;
+            }
+
+            if (pool.Count > 0) return pool.Dequeue();
+            return Instantiate(prefab, _currentNumberRoot ? _currentNumberRoot.transform : transform);
+        }
+
+        void RecycleActiveNumberDigits()
+        {
+            for (int i = 0; i < _activeNumberDigits.Count; i++)
+            {
+                var obj = _activeNumberDigits[i];
+                int digit = _activeDigitValues[i];
+                if (!obj) continue;
+
+                if (!_digitPools.TryGetValue(digit, out var pool))
+                {
+                    pool = new Queue<GameObject>();
+                    _digitPools[digit] = pool;
+                }
+
+                obj.SetActive(false);
+                pool.Enqueue(obj);
+            }
+
+            _activeNumberDigits.Clear();
+            _activeDigitValues.Clear();
+        }
+
+        void ClearNumberLabel()
+        {
+            RecycleActiveNumberDigits();
+            if (_currentNumberRoot) _currentNumberRoot.SetActive(false);
         }
     }
 }

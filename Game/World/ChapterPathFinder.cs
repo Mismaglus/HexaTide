@@ -72,21 +72,16 @@ namespace Game.World
 
         private static bool IsWalkable(HexCoords c, BattleHexGrid grid)
         {
-            // A. Check if tile exists in grid data
-            // (We iterate tiles to find the cell component. In a huge map, caching this in a Dictionary in Manager is better, 
-            // but for a chapter map, finding by tag/coords is acceptable or we assume the grid has a lookup).
+            HexCell cell = null;
+            if (grid != null) grid.TryGetCell(c, out cell);
 
-            // Optimization: In Phase 2/3 code, we didn't add a quick lookup to BattleHexGrid.
-            // For now, we rely on the MapManager's node dictionary if available, or raycast.
-            // BUT, strictly speaking, this function needs access to the HexCell.
+            if (cell == null && ChapterMapManager.Instance != null)
+            {
+                var node = ChapterMapManager.Instance.GetNodeAt(c);
+                if (node != null) cell = node.GetComponent<HexCell>();
+            }
 
-            if (ChapterMapManager.Instance == null) return false;
-
-            var node = ChapterMapManager.Instance.GetNodeAt(c);
-            if (node == null) return false; // Gap/Hole in map
-
-            var cell = node.GetComponent<HexCell>();
-            if (cell == null) return false;
+            if (cell == null) return false; // Gap/Hole in map
 
             // B. Logic Checks
             if (cell.IsFlooded) return false; // Blocked by Tide

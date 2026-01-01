@@ -30,7 +30,7 @@ namespace Game.Battle
 
         [Header("Player Intent")]
         public RangeOutlineDrawer impactDrawer;
-        public BattleArrow intentionArrow;
+        public PrefabArrow intentionArrow;
         public HexHighlighter highlighter;
 
         [Header("Player Colors")]
@@ -48,7 +48,7 @@ namespace Game.Battle
         public Color enemyFutureColor = new Color(1f, 0.8f, 0.2f, 1f);
 
         [Header("Enemy Arrow Pool")]
-        public BattleArrow arrowPrefab;
+        public PrefabArrow arrowPrefab;
         public Transform arrowPoolRoot;
 
         // Cache Data
@@ -61,7 +61,8 @@ namespace Game.Battle
         private readonly IntentData _immediateIntent = new(); // Red
         private readonly IntentData _futureIntent = new();    // Yellow/Orange
 
-        private readonly List<BattleArrow> _spawnedArrows = new();
+        private readonly List<PrefabArrow> _spawnedArrows = new();
+        private PrefabArrow _intentionArrowInstance;
 
         private OutlineState _currentState = OutlineState.None;
         private bool _showEnemyIntent = true;
@@ -71,6 +72,7 @@ namespace Game.Battle
         {
             if (!highlighter) highlighter = FindFirstObjectByType<HexHighlighter>(FindObjectsInactive.Exclude);
             if (arrowPoolRoot == null) arrowPoolRoot = transform;
+            ResolveIntentionArrowInstance();
         }
 
         // === 状态控制 ===
@@ -179,16 +181,22 @@ namespace Game.Battle
             {
                 start.y += 0.8f; end.y += 0.2f;
                 // ⭐ 箭头也用青色
-                intentionArrow.SetPositions(start, end, playerImpactColor);
+                var arrowInstance = ResolveIntentionArrowInstance();
+                if (arrowInstance) arrowInstance.SetPositions(start, end, playerImpactColor);
             }
-            else if (intentionArrow) intentionArrow.Hide();
+            else
+            {
+                var arrowInstance = ResolveIntentionArrowInstance();
+                if (arrowInstance) arrowInstance.Hide();
+            }
         }
 
         public void ClearPlayerIntent()
         {
             _impactArea.Clear();
             if (impactDrawer) impactDrawer.Hide();
-            if (intentionArrow) intentionArrow.Hide();
+            var arrowInstance = ResolveIntentionArrowInstance();
+            if (arrowInstance) arrowInstance.Hide();
             if (highlighter) highlighter.SetImpact(null);
         }
 
@@ -295,5 +303,23 @@ namespace Game.Battle
 
         void ShowDrawer(RangeOutlineDrawer d, HashSet<HexCoords> t) { if (d) { if (t != null && t.Count > 0) d.Show(t); else d.Hide(); } }
         void HideDrawer(RangeOutlineDrawer d) { if (d) d.Hide(); }
+
+        PrefabArrow ResolveIntentionArrowInstance()
+        {
+            if (_intentionArrowInstance) return _intentionArrowInstance;
+            if (!intentionArrow) return null;
+
+            if (!intentionArrow.gameObject.scene.IsValid())
+            {
+                _intentionArrowInstance = Instantiate(intentionArrow, arrowPoolRoot);
+                _intentionArrowInstance.Hide();
+            }
+            else
+            {
+                _intentionArrowInstance = intentionArrow;
+            }
+
+            return _intentionArrowInstance;
+        }
     }
 }

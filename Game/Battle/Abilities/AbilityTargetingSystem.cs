@@ -194,7 +194,7 @@ namespace Game.Battle
                 {
                     // 只有有效时才绘制意图
                     var aoeTiles = TargetingResolver.GetAOETiles(hoverC, _currentAbility, _caster.UnitRef.Coords);
-                    Vector3 startPos = _caster.transform.position;
+                    Vector3 startPos = grid.GetTileWorldPosition(_caster.UnitRef.Coords);
                     Vector3 endPos = grid.GetTileWorldPosition(hoverC);
 
                     bool isDirectionalAOE = _currentAbility.shape == TargetShape.Line || _currentAbility.shape == TargetShape.Cone;

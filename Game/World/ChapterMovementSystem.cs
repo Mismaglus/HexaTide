@@ -33,6 +33,8 @@ namespace Game.World
         private HexCoords? _hoveredCoords;
         private HexCoords? _plannedDestination; // Where we WANT to go (awaiting confirmation)
         private List<HexCoords> _currentPath;
+        private HexCoords? _currentPathTarget;
+        private HexCoords? _currentPathStart;
 
         void Start()
         {
@@ -104,7 +106,7 @@ namespace Game.World
                     _hoveredCoords = null;
                     if (_plannedDestination == null)
                     {
-                        highlighter.ClearVisuals(); // Clean up cursor/labels
+                        PathPreviewController.ClearPreview(highlighter); // Clean up cursor/labels
                         if (outlineManager) outlineManager.Hide();
 
                         // Clear Unit Highlight
@@ -122,29 +124,60 @@ namespace Game.World
 
         void OnHoverTile(HexCoords tile)
         {
-            if (_plannedDestination.HasValue) return;
+            Debug.Log($"[ChapterMovementSystem] Hover tile: {tile}");
+
+            if (_plannedDestination.HasValue)
+            {
+                Debug.Log($"[ChapterMovementSystem] Hover preview skipped: plan locked at {_plannedDestination.Value}.");
+                return;
+            }
+
+            if (_playerUnit == null)
+            {
+                Debug.Log("[ChapterMovementSystem] Hover aborted: player missing.");
+                return;
+            }
+
+            if (!highlighter)
+            {
+                Debug.Log("[ChapterMovementSystem] Hover aborted: highlighter missing.");
+                return;
+            }
 
             highlighter.SetHover(tile);
 
             if (outlineManager)
                 outlineManager.ShowOutline(new HashSet<HexCoords> { tile });
 
-            if (!_playerUnit.Coords.Equals(tile))
+            if (_playerUnit.Coords.Equals(tile))
             {
-                var path = ChapterPathfinder.FindPath(_playerUnit.Coords, tile, grid);
-                if (path != null && path.Count > 0)
-                {
-                    highlighter.ShowPath(path);
-                    highlighter.ShowDestCursor(tile, $"{path.Count} Steps");
-                }
-                else
-                {
-                    highlighter.ClearVisuals();
-                }
+                Debug.Log("[ChapterMovementSystem] Hover aborted: player==target.");
+                PathPreviewController.ClearPreview(highlighter);
+                _currentPath = null;
+                _currentPathTarget = null;
+                _currentPathStart = null;
+                return;
+            }
+
+            if (ChapterMapManager.Instance == null)
+            {
+                Debug.Log("[ChapterMovementSystem] Hover note: ChapterMapManager missing.");
+            }
+
+            if (PathPreviewController.TryShowChapterPreview(highlighter, grid, _playerUnit, tile, out var path))
+            {
+                Debug.Log($"[ChapterMovementSystem] Hover path count: {path.Count}");
+                _currentPath = path;
+                _currentPathTarget = tile;
+                _currentPathStart = _playerUnit.Coords;
             }
             else
             {
-                highlighter.ClearVisuals();
+                Debug.Log("[ChapterMovementSystem] Hover aborted: path null/empty.");
+                PathPreviewController.ClearPreview(highlighter);
+                _currentPath = null;
+                _currentPathTarget = null;
+                _currentPathStart = null;
             }
         }
 
@@ -163,75 +196,132 @@ namespace Game.World
 
             if (doubleClickToConfirm)
             {
-                PlanMove(target);
+                PlanMove(target, true);
             }
             else
             {
                 // If double click is disabled, just move immediately
-                PlanMove(target);
-                if (_currentPath != null && _currentPath.Count > 0) ExecuteMove();
+                if (PlanMove(target, false)) ExecuteMove();
             }
         }
 
-        void PlanMove(HexCoords target)
+        bool PlanMove(HexCoords target, bool lockPlan)
         {
-            ClearPlan(); // Remove old visuals
-
-            if (_playerUnit.Coords.Equals(target)) return; // Clicked on self
-
-            // Debugging Pathfinding
-            if (ChapterMapManager.Instance == null) { Debug.LogError("ChapterMapManager missing!"); return; }
-            var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
-            var endNode = ChapterMapManager.Instance.GetNodeAt(target);
-
-            if (startNode == null || endNode == null)
+            if (_playerUnit == null)
             {
-                Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start or end node is missing. Target: {target}");
-                return;
+                Debug.Log("[ChapterMovementSystem] PlanMove aborted: player missing.");
+                return false;
             }
 
-            // Calculate Path
-            var path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
+            bool hasCachedPath = _currentPath != null
+                && _currentPath.Count > 0
+                && _currentPathTarget.HasValue
+                && _currentPathTarget.Value.Equals(target)
+                && _currentPathStart.HasValue
+                && _currentPathStart.Value.Equals(_playerUnit.Coords);
+
+            if (!hasCachedPath)
+            {
+                ClearPlan(); // Remove old visuals
+            }
+            else if (!lockPlan)
+            {
+                _plannedDestination = null;
+            }
+
+            if (_playerUnit.Coords.Equals(target))
+            {
+                Debug.Log("[ChapterMovementSystem] PlanMove aborted: player==target.");
+                return false;
+            }
+
+            List<HexCoords> path = null;
+            if (hasCachedPath)
+            {
+                path = _currentPath;
+            }
+            else
+            {
+                // Debugging Pathfinding
+                if (ChapterMapManager.Instance == null)
+                {
+                    Debug.Log("[ChapterMovementSystem] PlanMove aborted: ChapterMapManager missing.");
+                    return false;
+                }
+
+                var startNode = ChapterMapManager.Instance.GetNodeAt(_playerUnit.Coords);
+                var endNode = ChapterMapManager.Instance.GetNodeAt(target);
+
+                if (startNode == null || endNode == null)
+                {
+                    Debug.LogWarning($"[ChapterMovementSystem] Aborting PlanMove because start or end node is missing. Target: {target}");
+                    return false;
+                }
+
+                // Calculate Path
+                path = ChapterPathfinder.FindPath(_playerUnit.Coords, target, grid);
+            }
 
             if (path == null || path.Count == 0)
             {
-                Debug.Log($"Path blocked or invalid. Start: {_playerUnit.Coords}, End: {target}");
+                Debug.Log($"[ChapterMovementSystem] PlanMove aborted: path null/blocked. Start: {_playerUnit.Coords}, End: {target}");
                 // TODO: Play 'Cannot Move' sound
-                return;
+                return false;
             }
 
             // Valid Plan
-            _plannedDestination = target;
+            if (lockPlan) _plannedDestination = target;
             _currentPath = path;
+            _currentPathTarget = target;
+            _currentPathStart = _playerUnit.Coords;
 
             // Draw visuals: Use the new ShowDestCursor API
             if (highlighter)
             {
-                // Show "X Steps" label
-                string label = $"{path.Count} Steps";
-                highlighter.ShowDestCursor(target, label);
+                PathPreviewController.ShowPreview(highlighter, grid, path, target);
             }
 
-            Debug.Log($"[Map] Plan set for {target} ({path.Count} steps). Click again to go.");
+            if (lockPlan)
+            {
+                Debug.Log($"[Map] Plan set for {target} ({path.Count} steps). Click again to go.");
+            }
+            else
+            {
+                Debug.Log($"[Map] Move ready for {target} ({path.Count} steps).");
+            }
+
+            return true;
         }
 
         void ExecuteMove()
         {
-            if (_currentPath == null || _currentPath.Count == 0) return;
+            if (_currentPath == null || _currentPath.Count == 0)
+            {
+                Debug.Log("[ChapterMovementSystem] ExecuteMove aborted: path null/empty.");
+                return;
+            }
+
+            var pathToMove = _currentPath;
 
             // Cleanup visuals before moving
-            highlighter.ClearVisuals();
+            PathPreviewController.ClearPreview(highlighter);
+            if (outlineManager) outlineManager.Hide();
             _plannedDestination = null;
+            _currentPath = null;
+            _currentPathTarget = null;
+            _currentPathStart = null;
 
             // Send to Mover
-            _playerMover.FollowPath(_currentPath, OnMoveFinished);
+            _playerMover.FollowPath(pathToMove, OnMoveFinished);
         }
 
         void ClearPlan()
         {
             _plannedDestination = null;
             _currentPath = null;
-            highlighter.ClearVisuals(); // Clears Cursor and Labels
+            _currentPathTarget = null;
+            _currentPathStart = null;
+            PathPreviewController.ClearPreview(highlighter); // Clears Cursor and Labels
             if (outlineManager) outlineManager.Hide();
         }
 

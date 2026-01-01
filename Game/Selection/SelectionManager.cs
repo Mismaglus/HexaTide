@@ -334,6 +334,7 @@ namespace Game.Battle
         {
             if (outlineManager) outlineManager.ClearMovementRange();
             if (gridCursor) gridCursor.Hide();
+            PathPreviewController.ClearPreview(highlighter);
         }
 
         public void RegisterUnit(Unit u)
@@ -378,23 +379,64 @@ namespace Game.Battle
 
         void OnHoverChanged(HexCoords? h)
         {
-            if (targetingSystem != null && targetingSystem.IsTargeting) { if (_hoverCache.HasValue) { _hoverCache = null; highlighter.SetHover(null); if (gridCursor) gridCursor.Hide(); } return; }
+            if (targetingSystem != null && targetingSystem.IsTargeting)
+            {
+                if (_hoverCache.HasValue)
+                {
+                    _hoverCache = null;
+                    highlighter.SetHover(null);
+                    if (gridCursor) gridCursor.Hide();
+                }
+                PathPreviewController.ClearPreview(highlighter);
+                return;
+            }
             _hoverCache = h;
             Unit unitUnderMouse = null;
 
             // 获取单位时也会触发迷雾检查，如果不可见会返回 null
             if (h.HasValue) TryGetUnitAt(h.Value, out unitUnderMouse);
 
-            if (unitUnderMouse != null) { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorHoverSelectable); }
+            if (unitUnderMouse != null)
+            {
+                if (gridCursor) gridCursor.Hide();
+                ApplyCursor(cursorHoverSelectable);
+                PathPreviewController.ClearPreview(highlighter);
+            }
             else if (SelectedUnit != null && SelectedUnit.IsPlayerControlled && h.HasValue)
             {
                 HexCoords pos = h.Value;
                 bool isFree = _currentFreeSet.Contains(pos);
 
                 if (gridCursor) gridCursor.Show(pos, isFree);
-                if (isFree) ApplyCursor(cursorMoveFree); else ApplyCursor(cursorInvalid);
+                if (isFree)
+                {
+                    ApplyCursor(cursorMoveFree);
+                    if (!HasUnitAt(pos))
+                    {
+                        var bu = SelectedUnit.GetComponent<BattleUnit>();
+                        bool isSprinting = (bu != null && bu.Status != null && bu.Status.HasSprintState);
+                        if (!PathPreviewController.TryShowBattlePreview(highlighter, grid, SelectedUnit, battleRules, isSprinting, pos, out _))
+                        {
+                            PathPreviewController.ClearPreview(highlighter);
+                        }
+                    }
+                    else
+                    {
+                        PathPreviewController.ClearPreview(highlighter);
+                    }
+                }
+                else
+                {
+                    ApplyCursor(cursorInvalid);
+                    PathPreviewController.ClearPreview(highlighter);
+                }
             }
-            else { if (gridCursor) gridCursor.Hide(); ApplyCursor(cursorDefault); }
+            else
+            {
+                if (gridCursor) gridCursor.Hide();
+                ApplyCursor(cursorDefault);
+                PathPreviewController.ClearPreview(highlighter);
+            }
 
             Unit newHover = unitUnderMouse;
             if (ReferenceEquals(newHover, _hoveredUnit)) return;

@@ -91,7 +91,7 @@ namespace Game.Battle
 
                         if (!plan.targetCell.Equals(enemyUnit.Coords))
                         {
-                            Vector3 start = enemy.transform.position;
+                            Vector3 start = grid.GetTileWorldPosition(plan.moveDest);
                             Vector3 end = grid.GetTileWorldPosition(plan.targetCell);
                             _arrowList.Add((start, end));
                         }

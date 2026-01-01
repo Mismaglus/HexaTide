@@ -454,7 +454,7 @@ namespace Game.Common
         public void ShowDestCursor(HexCoords c, string labelText)
         {
             if (!grid) return;
-            Vector3 pos = c.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
+            Vector3 pos = grid.GetTileWorldPosition(c);
             pos.y += 0.1f; // Slight offset
 
             // 1. Cursor
@@ -503,18 +503,22 @@ namespace Game.Common
                 HexCoords current = path[i];
                 HexCoords next = path[i + 1];
 
-                Vector3 pos = current.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
+                Vector3 pos = grid.GetTileWorldPosition(current);
                 pos.y += 0.05f;
 
                 GameObject node = GetPathNode();
                 node.transform.position = pos;
 
-                // Rotate to face next tile
-                Vector3 nextPos = next.ToWorld(grid.recipe.outerRadius, grid.recipe.useOddROffset);
-                Vector3 dir = (nextPos - pos).normalized;
-                if (dir != Vector3.zero)
+                // Rotate to face next tile (XZ plane only)
+                Vector3 nextPos = grid.GetTileWorldPosition(next);
+                nextPos.y = pos.y;
+
+                Vector3 dir = nextPos - pos;
+                dir.y = 0f;
+
+                if (dir.sqrMagnitude > 1e-6f)
                 {
-                    node.transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+                    node.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
                 }
 
                 node.SetActive(true);

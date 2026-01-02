@@ -107,5 +107,6 @@ namespace Game.UI
             _bodyBaseLength = Mathf.Max(0.001f, baseLength - Mathf.Max(0f, headLength));
             _initialized = true;
         }
+
     }
 }

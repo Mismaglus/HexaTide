@@ -24,6 +24,7 @@ namespace Game.Battle
         private HashSet<HexCoords> _dangerZone = new();
         private HashSet<HexCoords> _filteredDangerZone = new();
         private List<(Vector3, Vector3)> _arrowList = new();
+        private readonly HashSet<Unit> _moveListeners = new();
 
         void Awake()
         {
@@ -34,9 +35,19 @@ namespace Game.Battle
         }
 
         void Start() { StartCoroutine(InitRoutine()); }
-        IEnumerator InitRoutine() { yield return null; RefreshEnemyList(); if (_sm != null && _sm.CurrentTurn == TurnSide.Player) UpdateIntents(); }
+        IEnumerator InitRoutine()
+        {
+            yield return null;
+            RefreshEnemyList();
+            RegisterMoveListeners();
+            if (_sm != null && _sm.CurrentTurn == TurnSide.Player) UpdateIntents();
+        }
         void OnEnable() { if (_sm == null) _sm = BattleStateMachine.Instance ?? FindFirstObjectByType<BattleStateMachine>(); if (_sm != null) _sm.OnTurnChanged += HandleTurnChanged; }
-        void OnDisable() { if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged; }
+        void OnDisable()
+        {
+            if (_sm != null) _sm.OnTurnChanged -= HandleTurnChanged;
+            UnregisterMoveListeners();
+        }
 
         void HandleTurnChanged(TurnSide side)
         {
@@ -61,6 +72,7 @@ namespace Game.Battle
                 var bu = brain.GetComponent<BattleUnit>();
                 if (bu != null && bu.Attributes.Core.HP > 0) _enemies.Add(brain);
             }
+            RegisterMoveListeners();
         }
 
         public void UpdateIntents()
@@ -91,7 +103,10 @@ namespace Game.Battle
 
                         if (!plan.targetCell.Equals(enemyUnit.Coords))
                         {
-                            Vector3 start = grid.GetTileWorldPosition(plan.moveDest);
+                            // Draw intent from the enemy's current position.
+                            // Using the planned move destination can make long-range arrows appear to start
+                            // from an unexpected tile/edge (e.g. top-right) when the AI plans a detour.
+                            Vector3 start = grid.GetTileWorldPosition(enemyUnit.Coords);
                             Vector3 end = grid.GetTileWorldPosition(plan.targetCell);
                             _arrowList.Add((start, end));
                         }
@@ -121,6 +136,31 @@ namespace Game.Battle
             // 更新 UI
             if (outlineManager) outlineManager.SetEnemyIntent(_filteredDangerZone, _arrowList);
             if (highlighter) highlighter.SetEnemyDanger(_filteredDangerZone);
+        }
+
+        void RegisterMoveListeners()
+        {
+            var units = FindObjectsByType<Unit>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (var u in units)
+            {
+                if (u == null || !_moveListeners.Add(u)) continue;
+                u.OnMoveFinished += HandleUnitMoved;
+            }
+        }
+
+        void UnregisterMoveListeners()
+        {
+            foreach (var u in _moveListeners)
+            {
+                if (u) u.OnMoveFinished -= HandleUnitMoved;
+            }
+            _moveListeners.Clear();
+        }
+
+        void HandleUnitMoved(Unit unit, HexCoords from, HexCoords to)
+        {
+            if (_sm != null && _sm.CurrentTurn != TurnSide.Player) return;
+            UpdateIntents();
         }
     }
 }

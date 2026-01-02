@@ -469,6 +469,8 @@ namespace Game.Battle
                 RecalcRange();
                 UpdateGhost(u);
             }
+            if (BattleIntentSystem.Instance != null)
+                BattleIntentSystem.Instance.UpdateIntents();
         }
 
         void RecalcRange()

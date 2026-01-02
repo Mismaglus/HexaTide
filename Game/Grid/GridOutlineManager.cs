@@ -330,21 +330,55 @@ namespace Game.Battle
 
         void AdjustArrowEndpoints(ref Vector3 start, ref Vector3 end)
         {
-            float edgeOffset = GetHexEdgeOffset(start, end);
+            // Compute trimming in grid-local space so grid rotation/scale doesn't skew which edge is chosen.
+            // Then apply the trim back in world space.
+            if (!highlighter || !highlighter.grid || !highlighter.grid.recipe)
+            {
+                // Fallback: old world-space trim.
+                float edgeOffsetFallback = GetHexEdgeOffset(start, end);
+                if (edgeOffsetFallback <= 0f) return;
+
+                Vector3 flatDirFallback = end - start;
+                flatDirFallback.y = 0f;
+                float flatLenFallback = flatDirFallback.magnitude;
+                if (flatLenFallback <= 0.001f) return;
+
+                float maxTrimFallback = (flatLenFallback - 0.001f) * 0.5f;
+                float trimFallback = Mathf.Min(edgeOffsetFallback, maxTrimFallback);
+                if (trimFallback <= 0f) return;
+
+                Vector3 dirFallback = flatDirFallback / flatLenFallback;
+                start += dirFallback * trimFallback;
+                end -= dirFallback * trimFallback;
+                return;
+            }
+
+            var gridT = highlighter.grid.transform;
+            float outerRadius = highlighter.grid.recipe.outerRadius;
+
+            Vector3 startLocal = gridT.InverseTransformPoint(start);
+            Vector3 endLocal = gridT.InverseTransformPoint(end);
+
+            Vector3 deltaLocal = endLocal - startLocal;
+            deltaLocal.y = 0f;
+            float deltaLen = deltaLocal.magnitude;
+            if (deltaLen <= 0.001f) return;
+
+            float edgeOffset = ComputeHexEdgeDistance(deltaLocal, outerRadius);
             if (edgeOffset <= 0f) return;
 
-            Vector3 flatDir = end - start;
-            flatDir.y = 0f;
-            float flatLen = flatDir.magnitude;
-            if (flatLen <= 0.001f) return;
-
-            float maxTrim = (flatLen - 0.001f) * 0.5f;
+            float maxTrim = (deltaLen - 0.001f) * 0.5f;
             float trim = Mathf.Min(edgeOffset, maxTrim);
             if (trim <= 0f) return;
 
-            Vector3 dir = flatDir / flatLen;
-            start += dir * trim;
-            end -= dir * trim;
+            Vector3 dirLocal = deltaLocal / deltaLen;
+
+            // Preserve the original local Y offsets (we only trim in the plane).
+            startLocal += new Vector3(dirLocal.x, 0f, dirLocal.z) * trim;
+            endLocal -= new Vector3(dirLocal.x, 0f, dirLocal.z) * trim;
+
+            start = gridT.TransformPoint(startLocal);
+            end = gridT.TransformPoint(endLocal);
         }
 
         float GetHexEdgeOffset(Vector3 start, Vector3 end)

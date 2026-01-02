@@ -4,21 +4,11 @@ namespace Game.UI
 {
     public class PrefabArrow : MonoBehaviour
     {
-        [Header("Settings")]
-        [Tooltip("Prefab length in world units when scale is 1.")]
-        public float baseLength = 1f;
-        public float minLength = 0.1f;
-        public float maxLength = 100f;
-        [Tooltip("0 = start (tail), 0.5 = center, 1 = end (tip) of the mesh.")]
-        [Range(0f, 1f)] public float pivotOffset = 0.5f;
-
-        [Header("Segmented Stretch")]
-        [Tooltip("Optional: scale only this part along local Z.")]
+        [Header("References")]
+        [Tooltip("Shaft root/pivot at the tail (start point).")]
         public Transform stretchRoot;
-        [Tooltip("Optional: keep this part unscaled (tip).")]
+        [Tooltip("Head pivot at the shaft connection point (base of the head).")]
         public Transform head;
-        [Tooltip("Fixed head length in world units when scale is 1.")]
-        public float headLength = 0.3f;
 
         Vector3 _baseScale;
         Renderer[] _renderers;
@@ -26,7 +16,7 @@ namespace Game.UI
         Vector3 _stretchBaseScale;
         Vector3 _headBaseScale;
         Vector3 _headBaseLocalPos;
-        float _bodyBaseLength;
+        float _baseConnectionLength;
 
         void Awake()
         {
@@ -44,33 +34,33 @@ namespace Game.UI
                 return;
             }
 
-            float clampedLength = Mathf.Clamp(length, minLength, maxLength);
-            float scaleFactor = clampedLength / Mathf.Max(baseLength, 0.001f);
-
             Vector3 forward = dir.normalized;
-            float offset = clampedLength * Mathf.Clamp01(pivotOffset);
-            transform.position = start + forward * offset;
+            transform.position = start;
             transform.rotation = Quaternion.LookRotation(-forward, Vector3.up);
 
             if (stretchRoot && head)
             {
-                float bodyTargetLength = Mathf.Max(0f, clampedLength - Mathf.Max(0f, headLength));
-                float bodyScaleFactor = bodyTargetLength / Mathf.Max(_bodyBaseLength, 0.001f);
+                float targetLength = length;
+                float scaleFactor = targetLength / Mathf.Max(0.001f, _baseConnectionLength);
 
-                Vector3 stretchScale = _stretchBaseScale;
-                stretchScale.z = _stretchBaseScale.z * bodyScaleFactor;
-                stretchRoot.localScale = stretchScale;
+                if (targetLength <= _baseConnectionLength)
+                {
+                    float uniformScale = Mathf.Max(0.001f, scaleFactor);
+                    transform.localScale = _baseScale * uniformScale;
+                    stretchRoot.localScale = _stretchBaseScale;
+                    head.localPosition = _headBaseLocalPos;
+                    head.localScale = _headBaseScale;
+                }
+                else
+                {
+                    Vector3 stretchScale = _stretchBaseScale;
+                    stretchScale.z = _stretchBaseScale.z * scaleFactor;
+                    stretchRoot.localScale = stretchScale;
 
-                head.localPosition = _headBaseLocalPos + Vector3.back * (bodyTargetLength - _bodyBaseLength);
-                head.localScale = _headBaseScale;
-
-                transform.localScale = _baseScale;
-            }
-            else
-            {
-                Vector3 scaled = _baseScale;
-                scaled.z = _baseScale.z * scaleFactor;
-                transform.localScale = scaled;
+                    head.localPosition = _headBaseLocalPos + Vector3.back * (targetLength - _baseConnectionLength);
+                    head.localScale = _headBaseScale;
+                    transform.localScale = _baseScale;
+                }
             }
 
             SetVisible(true);
@@ -104,7 +94,7 @@ namespace Game.UI
                 _headBaseScale = head.localScale;
                 _headBaseLocalPos = head.localPosition;
             }
-            _bodyBaseLength = Mathf.Max(0.001f, baseLength - Mathf.Max(0f, headLength));
+            _baseConnectionLength = Mathf.Max(0.001f, Mathf.Abs(_headBaseLocalPos.z));
             _initialized = true;
         }
 

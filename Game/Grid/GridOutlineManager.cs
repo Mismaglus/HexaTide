@@ -182,7 +182,11 @@ namespace Game.Battle
                 start.y += 0.8f; end.y += 0.2f;
                 // ⭐ 箭头也用青色
                 var arrowInstance = ResolveIntentionArrowInstance();
-                if (arrowInstance) arrowInstance.SetPositions(start, end, playerImpactColor);
+                if (arrowInstance)
+                {
+                    AdjustArrowEndpoints(ref start, ref end);
+                    arrowInstance.SetPositions(start, end, playerImpactColor);
+                }
             }
             else
             {
@@ -287,7 +291,9 @@ namespace Game.Battle
                     // 稍微抬高
                     s.y += 0.8f; e.y += 0.2f;
 
-                    _spawnedArrows[i].SetPositions(s, e, data.Item3);
+                    var arrow = _spawnedArrows[i];
+                    AdjustArrowEndpoints(ref s, ref e);
+                    arrow.SetPositions(s, e, data.Item3);
                 }
                 else
                 {
@@ -321,5 +327,65 @@ namespace Game.Battle
 
             return _intentionArrowInstance;
         }
+
+        void AdjustArrowEndpoints(ref Vector3 start, ref Vector3 end)
+        {
+            float edgeOffset = GetHexEdgeOffset(start, end);
+            if (edgeOffset <= 0f) return;
+
+            Vector3 flatDir = end - start;
+            flatDir.y = 0f;
+            float flatLen = flatDir.magnitude;
+            if (flatLen <= 0.001f) return;
+
+            float maxTrim = (flatLen - 0.001f) * 0.5f;
+            float trim = Mathf.Min(edgeOffset, maxTrim);
+            if (trim <= 0f) return;
+
+            Vector3 dir = flatDir / flatLen;
+            start += dir * trim;
+            end -= dir * trim;
+        }
+
+        float GetHexEdgeOffset(Vector3 start, Vector3 end)
+        {
+            if (!highlighter || !highlighter.grid || !highlighter.grid.recipe) return 0f;
+
+            Vector3 dir = end - start;
+            dir.y = 0f;
+            if (dir.sqrMagnitude <= 0.0001f) return 0f;
+
+            float outerRadius = highlighter.grid.recipe.outerRadius;
+            return ComputeHexEdgeDistance(dir, outerRadius);
+        }
+
+        static float ComputeHexEdgeDistance(Vector3 direction, float outerRadius)
+        {
+            Vector2 dir = new Vector2(direction.x, direction.z);
+            if (dir.sqrMagnitude <= 0.0001f) return 0f;
+            dir.Normalize();
+
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector2 p = HexMetrics.CORNER_DIRS[i] * outerRadius;
+                Vector2 q = HexMetrics.CORNER_DIRS[(i + 1) % 6] * outerRadius;
+                Vector2 s = q - p;
+                float denom = Cross(dir, s);
+                if (Mathf.Abs(denom) < 0.000001f) continue;
+
+                float t = Cross(p, s) / denom;
+                float u = Cross(p, dir) / denom;
+                if (t >= 0f && u >= 0f && u <= 1f)
+                {
+                    if (t < best) best = t;
+                }
+            }
+
+            if (float.IsInfinity(best)) return outerRadius;
+            return best;
+        }
+
+        static float Cross(Vector2 a, Vector2 b) => (a.x * b.y) - (a.y * b.x);
     }
 }

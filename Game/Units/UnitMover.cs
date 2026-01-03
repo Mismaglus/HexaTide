@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Core.Hex;
 using Game.Grid;
 using Game.Battle;
@@ -94,10 +95,19 @@ namespace Game.Units
         IEnumerator CoFollowPath(List<HexCoords> path, Action onComplete)
         {
             IsMoving = true;
+            int sceneHandleAtStart = SceneManager.GetActiveScene().handle;
+            bool abortedBySceneChange = false;
             OnMoveStarted?.Invoke(_mCoords, path[0]);
 
             foreach (var nextStep in path)
             {
+                if (SceneManager.GetActiveScene().handle != sceneHandleAtStart)
+                {
+                    abortedBySceneChange = true;
+                    Debug.LogWarning("[UnitMover] Path aborted due to scene change.");
+                    break;
+                }
+
                 if (!CanStepTo(nextStep))
                 {
                     Debug.LogWarning("[UnitMover] Path interrupted (Not enough resources).");
@@ -121,15 +131,27 @@ namespace Game.Units
                 else _mCoords = nextStep;
 
                 OnMoveFinished?.Invoke(currentPos, nextStep);
+
+                // If a listener (e.g., ChapterMapManager -> ChapterNode -> EncounterNode) LoadScene()'d,
+                // stop remaining movement immediately to avoid interacting with destroyed scene objects.
+                if (SceneManager.GetActiveScene().handle != sceneHandleAtStart)
+                {
+                    abortedBySceneChange = true;
+                    Debug.LogWarning("[UnitMover] Path aborted due to scene change (during OnMoveFinished).");
+                    break;
+                }
             }
 
             IsMoving = false;
             OnPathCompleted?.Invoke();
 
-            if (BattleIntentSystem.Instance != null)
-                BattleIntentSystem.Instance.UpdateIntents();
+            if (!abortedBySceneChange)
+            {
+                if (BattleIntentSystem.Instance != null)
+                    BattleIntentSystem.Instance.UpdateIntents();
 
-            onComplete?.Invoke();
+                onComplete?.Invoke();
+            }
         }
 
         void ConsumeResources(int cost)

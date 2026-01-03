@@ -348,9 +348,27 @@ namespace Game.World
 
             if (_nodes.TryGetValue(to, out var node))
             {
+                // Unity "fake null": destroyed objects compare equal to null.
+                // If we keep them in _nodes, any member access (e.g., node.isCleared) can throw MissingReferenceException.
+                if (node == null)
+                {
+                    _nodes.Remove(to);
+                    Debug.LogWarning($"[ChapterMapManager] Removed destroyed ChapterNode at {to} (move {from} -> {to}).");
+                    return;
+                }
+
                 if (!node.isCleared)
                 {
                     node.Interact();
+
+                    // Interact() may synchronously LoadScene (e.g., EncounterNode.StartEncounter).
+                    // If so, this ChapterMap scene's objects can be destroyed immediately.
+                    // Bail out to avoid touching stale references (including tide logic).
+                    if (node == null)
+                    {
+                        Debug.LogWarning($"[ChapterMapManager] Movement commit interrupted by scene change at {to} (move {from} -> {to}).");
+                        return;
+                    }
                 }
             }
 

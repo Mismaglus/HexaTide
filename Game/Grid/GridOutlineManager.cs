@@ -343,13 +343,41 @@ namespace Game.Battle
                 float flatLenFallback = flatDirFallback.magnitude;
                 if (flatLenFallback <= 0.001f) return;
 
-                float maxTrimFallback = (flatLenFallback - 0.001f) * 0.5f;
-                float trimFallback = Mathf.Min(edgeOffsetFallback, maxTrimFallback);
-                if (trimFallback <= 0f) return;
+                float minVisibleLenFallback = edgeOffsetFallback * 0.6f;
+
+                float startTrimFallback = edgeOffsetFallback;
+                float endTrimFallback = edgeOffsetFallback;
+
+                float maxTotalTrimFallback = Mathf.Max(0f, flatLenFallback - 0.001f);
+                float totalTrimFallback = startTrimFallback + endTrimFallback;
+                if (totalTrimFallback > maxTotalTrimFallback)
+                {
+                    float scale = maxTotalTrimFallback / Mathf.Max(0.0001f, totalTrimFallback);
+                    startTrimFallback *= scale;
+                    endTrimFallback *= scale;
+                    totalTrimFallback = startTrimFallback + endTrimFallback;
+                }
+
+                float remainingFallback = flatLenFallback - totalTrimFallback;
+                if (remainingFallback < minVisibleLenFallback)
+                {
+                    float need = (minVisibleLenFallback - remainingFallback);
+                    float reduceEach = need * 0.5f;
+                    startTrimFallback = Mathf.Max(0f, startTrimFallback - reduceEach);
+                    endTrimFallback = Mathf.Max(0f, endTrimFallback - reduceEach);
+
+                    totalTrimFallback = startTrimFallback + endTrimFallback;
+                    if (totalTrimFallback > maxTotalTrimFallback)
+                    {
+                        float scale = maxTotalTrimFallback / Mathf.Max(0.0001f, totalTrimFallback);
+                        startTrimFallback *= scale;
+                        endTrimFallback *= scale;
+                    }
+                }
 
                 Vector3 dirFallback = flatDirFallback / flatLenFallback;
-                start += dirFallback * trimFallback;
-                end -= dirFallback * trimFallback;
+                start += dirFallback * startTrimFallback;
+                end -= dirFallback * endTrimFallback;
                 return;
             }
 
@@ -367,15 +395,46 @@ namespace Game.Battle
             float edgeOffset = ComputeHexEdgeDistance(deltaLocal, outerRadius);
             if (edgeOffset <= 0f) return;
 
-            float maxTrim = (deltaLen - 0.001f) * 0.5f;
-            float trim = Mathf.Min(edgeOffset, maxTrim);
-            if (trim <= 0f) return;
+            // For very short arrows (e.g., adjacent tiles), trimming both ends to the hex edge
+            // can leave almost no shaft length, making the prefab render awkwardly.
+            // Enforce a minimum visible length by reducing trims (allowing slight intrusion).
+            float minVisibleLen = outerRadius * 0.6f;
+
+            float startTrim = edgeOffset;
+            float endTrim = edgeOffset;
+
+            float maxTotalTrim = Mathf.Max(0f, deltaLen - 0.001f);
+            float totalTrim = startTrim + endTrim;
+            if (totalTrim > maxTotalTrim)
+            {
+                float scale = maxTotalTrim / Mathf.Max(0.0001f, totalTrim);
+                startTrim *= scale;
+                endTrim *= scale;
+                totalTrim = startTrim + endTrim;
+            }
+
+            float remaining = deltaLen - totalTrim;
+            if (remaining < minVisibleLen)
+            {
+                float need = (minVisibleLen - remaining);
+                float reduceEach = need * 0.5f;
+                startTrim = Mathf.Max(0f, startTrim - reduceEach);
+                endTrim = Mathf.Max(0f, endTrim - reduceEach);
+
+                totalTrim = startTrim + endTrim;
+                if (totalTrim > maxTotalTrim)
+                {
+                    float scale = maxTotalTrim / Mathf.Max(0.0001f, totalTrim);
+                    startTrim *= scale;
+                    endTrim *= scale;
+                }
+            }
 
             Vector3 dirLocal = deltaLocal / deltaLen;
 
             // Preserve the original local Y offsets (we only trim in the plane).
-            startLocal += new Vector3(dirLocal.x, 0f, dirLocal.z) * trim;
-            endLocal -= new Vector3(dirLocal.x, 0f, dirLocal.z) * trim;
+            startLocal += new Vector3(dirLocal.x, 0f, dirLocal.z) * startTrim;
+            endLocal -= new Vector3(dirLocal.x, 0f, dirLocal.z) * endTrim;
 
             start = gridT.TransformPoint(startLocal);
             end = gridT.TransformPoint(endLocal);

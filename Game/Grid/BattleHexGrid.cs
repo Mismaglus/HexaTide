@@ -29,6 +29,12 @@ namespace Game.Battle
             private set => _recipe = value;
         }
 
+        public void SetRecipe(GridRecipe newRecipe)
+        {
+            _recipe = newRecipe;
+            _dirty = true;
+        }
+
         [SerializeField] private bool _useRecipeBorderMode = true;
         [SerializeField] private BorderMode _runtimeBorderMode = BorderMode.AllUnique;
         private BorderMode _lastRuntimeMode;
@@ -141,6 +147,11 @@ namespace Game.Battle
                 recipe.useOddROffset = true;
                 recipe.borderMode = BorderMode.AllUnique;
             }
+
+            // Mark the grid as clean for the current settings so Update() doesn't immediately rebuild again.
+            _dirty = false;
+            _lastRecipeHash = ComputeRecipeHash();
+            _lastRuntimeMode = _runtimeBorderMode;
 
             ClearChildren();
             SetupMaterials();

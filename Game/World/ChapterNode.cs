@@ -30,18 +30,20 @@ namespace Game.World
 
         // Optional exit info for boss nodes that act like chapter gates (Act1 routing).
         public GateKind ExitGateKind { get; private set; } = GateKind.None;
+        public int NextAct { get; private set; }
         public string NextChapterId { get; private set; }
 
         private HexCell _cell;
 
         private const string ICON_NAME_PREFIX = "ChapterNodeIcon";
 
-        public void Initialize(ChapterNodeType nodeType, string bossId = null, GateKind exitGateKind = GateKind.None, string nextChapterId = null)
+        public void Initialize(ChapterNodeType nodeType, string bossId = null, GateKind exitGateKind = GateKind.None, int nextAct = 0, string nextChapterId = null)
         {
             type = nodeType;
             isCleared = false;
             BossId = string.IsNullOrEmpty(bossId) ? null : bossId;
             ExitGateKind = exitGateKind;
+            NextAct = nextAct;
             NextChapterId = string.IsNullOrEmpty(nextChapterId) ? null : nextChapterId;
             _cell = GetComponent<HexCell>();
             _cell.RefreshFogVisuals();
@@ -107,15 +109,11 @@ namespace Game.World
                 return;
             }
 
-            // Placement: always relative to the tile/node transform (stable regardless of CenterOffset)
-            // If no node icon library is provided, fall back to sensible defaults.
-            Vector3 localOffset = library != null ? library.localOffset : new Vector3(0f, 0.05f, 0f);
-            Vector3 localEuler = library != null ? library.localEuler : Vector3.zero;
-            float localScale = Mathf.Max(0.0001f, library != null ? library.localScale : 1f);
-
-            iconTransform.localPosition = localOffset;
-            iconTransform.localRotation = Quaternion.Euler(localEuler);
-            iconTransform.localScale = new Vector3(localScale, localScale, localScale);
+            // Placement is controlled by the prefab itself.
+            // Keep the icon root aligned to the node so different prefab sizes/orientations work naturally.
+            iconTransform.localPosition = Vector3.zero;
+            iconTransform.localRotation = Quaternion.identity;
+            iconTransform.localScale = Vector3.one;
 
             RemoveSpriteRendererIfAny(iconTransform);
             EnsurePrefabInstance(iconTransform, prefab);
@@ -136,6 +134,8 @@ namespace Game.World
 
         private static void EnsurePrefabInstance(Transform iconRoot, GameObject prefab)
         {
+            if (iconRoot != null && !iconRoot.gameObject.activeSelf) iconRoot.gameObject.SetActive(true);
+
             // Minimal behavior: keep at most one instantiated icon model under root.
             // If something already exists, replace it to match the configured prefab.
             bool needsReplace = true;
@@ -152,11 +152,10 @@ namespace Game.World
             if (!needsReplace) return;
 
             DestroyAllChildren(iconRoot);
-            var instance = Instantiate(prefab, iconRoot);
+            // Keep the prefab-authored local transform/scale.
+            var instance = Instantiate(prefab, iconRoot, false);
             instance.name = prefab.name;
-            instance.transform.localPosition = Vector3.zero;
-            instance.transform.localRotation = Quaternion.identity;
-            instance.transform.localScale = Vector3.one;
+            if (!instance.activeSelf) instance.SetActive(true);
         }
 
         private static void RemoveSpriteRendererIfAny(Transform t)
@@ -241,7 +240,8 @@ namespace Game.World
                     ctx.rewardProfileId = "BossGate";
                     ctx.policy = ReturnPolicy.ExitChapter;
                     ctx.gateKind = ExitGateKind;
-                    ctx.nextChapterId = NextChapterId; // If null/empty, BattleOutcomeUI may choose by gateKind.
+                    ctx.nextAct = NextAct;
+                    ctx.nextChapterId = NextChapterId; // Now treated as nextRegionId (REGION_*).
                     break;
                 default:
                     ctx.rewardProfileId = "Normal";

@@ -219,33 +219,19 @@ namespace Game.UI
             if (context.HasValue && context.Value.policy == ReturnPolicy.ExitChapter)
             {
                 var exitContext = context.Value;
-                var destination = exitContext.nextChapterId;
+                var destinationRegionId = exitContext.nextChapterId;
+                var destinationAct = exitContext.nextAct;
 
-                if (string.IsNullOrEmpty(destination))
-                {
-                    switch (exitContext.gateKind)
-                    {
-                        case GateKind.SkipGate:
-                            destination = "Act3_StarreachPeak";
-                            break;
-                        case GateKind.LeftGate:
-                            destination = "Act2_LeftBiome";
-                            break;
-                        case GateKind.RightGate:
-                            destination = "Act2_RightBiome";
-                            break;
-                    }
-                }
-
-                Debug.Log($"[BattleOutcome] Exiting Chapter via {exitContext.gateKind}. Destination: {destination}");
+                Debug.Log($"[BattleOutcome] Exiting Chapter via {exitContext.gateKind}. NextAct: {destinationAct}, NextRegion: {destinationRegionId}");
 
                 // Clear Map Data as we are leaving the chapter
                 MapRuntimeData.Clear();
 
                 // Single MapScene: destination is treated as ChapterId, not SceneName
-                if (!string.IsNullOrEmpty(destination))
+                if (!string.IsNullOrEmpty(destinationRegionId))
                 {
-                    FlowContext.CurrentChapterId = destination;
+                    if (destinationAct > 0) FlowContext.CurrentAct = destinationAct;
+                    FlowContext.CurrentChapterId = destinationRegionId;
                 }
                 else
                 {

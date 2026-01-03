@@ -15,22 +15,6 @@ namespace Game.World
 
         [Header("Grid References")]
         public BattleHexGrid grid;
-        public GridRecipe mapRecipe;
-
-        [Header("Tide Configuration")]
-        public int movesPerTideStep = 3;
-        public float tideAnimationDelay = 0.5f;
-
-        [Header("Generation Settings")]
-        public int eliteCount = 3;
-        public int merchantCount = 2;
-        public int mysteryCount = 4;
-
-        [Tooltip("Number of empty tiles to place (reduces map density). Empty tiles have no encounter.")]
-        public int emptyCount = 6;
-
-        [Header("Act Settings")]
-        public bool isAct1 = true; // Simple toggle for now to distinguish generation logic
 
         [Header("Chapter Settings")]
         [Tooltip("Optional settings database. If assigned, MapScene can load different chapters via FlowContext.CurrentChapterId.")]
@@ -38,6 +22,10 @@ namespace Game.World
 
         [Tooltip("Fallback settings if DB lookup fails or FlowContext is empty.")]
         public ChapterSettings defaultSettings;
+
+        [Header("Region Themes")]
+        [Tooltip("Optional per-region theme overrides (tile/border materials). This lets regions vary visually without duplicating GridRecipes.")]
+        public RegionThemeDB regionThemeDB;
 
         [Header("Node Icon Layer (MVP)")]
         [Tooltip("Optional icon mapping for ChapterNodeType -> 3D prefab. If a type is not mapped, no icon will be shown for that node.")]
@@ -66,11 +54,22 @@ namespace Game.World
         private Unit _playerUnit;
         private static readonly HexCoordsComparer _hexComparer = new HexCoordsComparer();
         private Dictionary<HexCoords, ChapterNode> _nodes = new Dictionary<HexCoords, ChapterNode>(_hexComparer);
+        private ChapterSettings _activeSettings;
 
-        private BossSelectionProfile _bossProfile;
+        private GridRecipe _runtimeRecipe;
+
+        public ChapterSettings ActiveSettings => _activeSettings;
 
         public int CurrentTideRow => _currentTideRow;
-        public int MovesBeforeNextTide => movesPerTideStep - (_playerMoveCount % movesPerTideStep);
+        public int MovesBeforeNextTide
+        {
+            get
+            {
+                int step = _activeSettings != null ? _activeSettings.movesPerTideStep : 0;
+                if (step <= 0) return 0;
+                return step - (_playerMoveCount % step);
+            }
+        }
 
         private sealed class HexCoordsComparer : IEqualityComparer<HexCoords>
         {
@@ -98,29 +97,22 @@ namespace Game.World
 
         void Start()
         {
+            EnsureFlowDefaults();
+
             // Load and apply chapter settings BEFORE generating/restoring map.
             var settings = LoadActiveSettings();
             ApplySettings(settings);
 
-            // Ensure FlowContext has a stable chapter id for later SaveMapState().
-            if (settings != null && !string.IsNullOrEmpty(settings.chapterId))
-            {
-                FlowContext.CurrentChapterId = settings.chapterId;
-            }
-
             if (MapRuntimeData.HasData)
             {
-                // If we are returning from battle, prefer the saved chapter id.
-                if (!string.IsNullOrEmpty(MapRuntimeData.CurrentChapterId))
-                {
-                    FlowContext.CurrentChapterId = MapRuntimeData.CurrentChapterId;
+                // If we are returning from battle, restore act/region routing.
+                RestoreFlowFromRuntimeData();
 
-                    // Re-resolve settings if needed (for safety).
-                    var restoredSettings = ResolveSettingsById(MapRuntimeData.CurrentChapterId);
-                    if (restoredSettings != null)
-                    {
-                        ApplySettings(restoredSettings);
-                    }
+                // Re-resolve settings if needed (for safety).
+                var restoredSettings = LoadActiveSettings();
+                if (restoredSettings != null)
+                {
+                    ApplySettings(restoredSettings);
                 }
 
                 RestoreMapState();
@@ -148,18 +140,11 @@ namespace Game.World
 
         private ChapterSettings LoadActiveSettings()
         {
-            // Priority:
-            // 1) Return from battle => MapRuntimeData.CurrentChapterId
-            // 2) Normal navigation => FlowContext.CurrentChapterId
-            // 3) Fallback => defaultSettings
-            string id = MapRuntimeData.HasData ? MapRuntimeData.CurrentChapterId : FlowContext.CurrentChapterId;
+            // Settings are act-specific.
+            int act = MapRuntimeData.HasData && MapRuntimeData.CurrentAct > 0 ? MapRuntimeData.CurrentAct : FlowContext.CurrentAct;
+            if (act <= 0) act = 1;
 
-            if (string.IsNullOrEmpty(id))
-            {
-                return defaultSettings;
-            }
-
-            var s = ResolveSettingsById(id);
+            var s = ResolveSettingsByAct(act);
             return s != null ? s : defaultSettings;
         }
 
@@ -169,24 +154,98 @@ namespace Game.World
             return settingsDB.GetSettings(chapterId);
         }
 
+        private ChapterSettings ResolveSettingsByAct(int actNumber)
+        {
+            if (settingsDB == null) return null;
+            return settingsDB.GetSettings(actNumber);
+        }
+
         private void ApplySettings(ChapterSettings settings)
         {
             if (settings == null) return;
 
-            isAct1 = settings.isAct1;
-            eliteCount = settings.eliteCount;
-            merchantCount = settings.merchantCount;
-            mysteryCount = settings.mysteryCount;
+            _activeSettings = settings;
 
-            movesPerTideStep = settings.movesPerTideStep;
-            tideAnimationDelay = settings.tideAnimationDelay;
-
-            if (settings.gridRecipe != null)
+            if (grid != null && settings.gridRecipe != null)
             {
-                mapRecipe = settings.gridRecipe;
+                ReplaceRuntimeRecipe(settings.gridRecipe);
+                grid.SetRecipe(_runtimeRecipe);
+            }
+        }
+
+        private void ReplaceRuntimeRecipe(GridRecipe source)
+        {
+            if (_runtimeRecipe != null)
+            {
+#if UNITY_EDITOR
+                if (!Application.isPlaying) DestroyImmediate(_runtimeRecipe);
+                else Destroy(_runtimeRecipe);
+#else
+                Destroy(_runtimeRecipe);
+#endif
             }
 
-            _bossProfile = settings.bossSelectionProfile;
+            _runtimeRecipe = Instantiate(source);
+            _runtimeRecipe.name = $"{source.name}_Runtime";
+
+            ApplyRegionThemeToRecipe(_runtimeRecipe);
+        }
+
+        private void ApplyRegionThemeToRecipe(GridRecipe recipe)
+        {
+            if (recipe == null) return;
+            if (regionThemeDB == null) return;
+            if (!regionThemeDB.TryGetTheme(FlowContext.CurrentChapterId, out var theme) || theme == null) return;
+
+            if (theme.tileMaterial != null) recipe.tileMaterial = theme.tileMaterial;
+            if (theme.borderMaterial != null) recipe.borderMaterial = theme.borderMaterial;
+        }
+
+        private static void EnsureFlowDefaults()
+        {
+            if (FlowContext.CurrentAct <= 0) FlowContext.CurrentAct = 1;
+            if (string.IsNullOrEmpty(FlowContext.CurrentChapterId)) FlowContext.CurrentChapterId = "REGION_1";
+        }
+
+        private static void RestoreFlowFromRuntimeData()
+        {
+            if (MapRuntimeData.CurrentAct > 0) FlowContext.CurrentAct = MapRuntimeData.CurrentAct;
+
+            if (!string.IsNullOrEmpty(MapRuntimeData.CurrentRegionId))
+            {
+                FlowContext.CurrentChapterId = MapRuntimeData.CurrentRegionId;
+                return;
+            }
+
+            // Back-compat: older saves only had CurrentChapterId which might contain legacy Act2_/Act3_ strings.
+            if (!string.IsNullOrEmpty(MapRuntimeData.CurrentChapterId))
+            {
+                var legacy = MapRuntimeData.CurrentChapterId;
+                if (legacy.StartsWith("REGION_"))
+                {
+                    FlowContext.CurrentChapterId = legacy;
+                    return;
+                }
+
+                if (legacy.StartsWith("Act2_"))
+                {
+                    FlowContext.CurrentAct = 2;
+                    FlowContext.CurrentChapterId = legacy.Contains("Right") ? "REGION_4" : "REGION_2";
+                    return;
+                }
+                if (legacy.StartsWith("Act3_"))
+                {
+                    FlowContext.CurrentAct = 3;
+                    FlowContext.CurrentChapterId = "REGION_7";
+                    return;
+                }
+                if (legacy.StartsWith("Act4_"))
+                {
+                    FlowContext.CurrentAct = 4;
+                    FlowContext.CurrentChapterId = "REGION_8";
+                    return;
+                }
+            }
         }
 
         // =========================================================
@@ -227,13 +286,17 @@ namespace Game.World
                 Debug.LogError("[ChapterMapManager] grid is null.");
                 return;
             }
-            if (mapRecipe == null)
+
+            var activeRecipe = _runtimeRecipe != null ? _runtimeRecipe : (_activeSettings != null ? _activeSettings.gridRecipe : null);
+            if (activeRecipe == null)
             {
-                Debug.LogError("[ChapterMapManager] mapRecipe is null. Assign a GridRecipe or use ChapterSettings.");
+                Debug.LogError("[ChapterMapManager] ChapterSettings.gridRecipe is null. Assign a GridRecipe in ChapterSettings.");
                 return;
             }
 
-            mapRecipe.randomSeed = seed;
+            // Ensure the grid uses the active recipe, then set its runtime seed.
+            grid.SetRecipe(activeRecipe);
+            activeRecipe.randomSeed = seed;
             grid.Rebuild();
 
             _nodes.Clear();
@@ -266,7 +329,7 @@ namespace Game.World
 
             if (logNodeSummaryOnGenerate)
             {
-                DumpNodeSummary();
+                StartCoroutine(DumpNodeSummaryNextFrame());
             }
 
             Debug.Log($"[ChapterMapManager] Generated {_nodes.Count} nodes. MinRow={_minRow}, MaxRow={_maxRow}.");
@@ -287,7 +350,7 @@ namespace Game.World
             if (_nodes.ContainsKey(startCoords)) _nodes[startCoords].Initialize(ChapterNodeType.Start);
 
             // 2. Boss / Gates (Top Row)
-            if (isAct1)
+            if (_activeSettings != null && _activeSettings.IsAct1)
             {
                 // Act 1: Three boss nodes on the top row that act as exits (left/right/skip).
                 if (topRowNodes.Count >= 3)
@@ -303,9 +366,9 @@ namespace Game.World
                     pickedBossIdsByGate.TryGetValue(GateKind.RightGate, out var rightBoss);
                     pickedBossIdsByGate.TryGetValue(GateKind.SkipGate, out var skipBoss);
 
-                    leftNode.Initialize(ChapterNodeType.Boss, leftBoss, GateKind.LeftGate, "Act2_LeftBiome");
-                    rightNode.Initialize(ChapterNodeType.Boss, rightBoss, GateKind.RightGate, "Act2_RightBiome");
-                    centerNode.Initialize(ChapterNodeType.Boss, skipBoss, GateKind.SkipGate, "Act3_StarreachPeak");
+                    leftNode.Initialize(ChapterNodeType.Boss, leftBoss, GateKind.LeftGate, 2, "REGION_2");
+                    rightNode.Initialize(ChapterNodeType.Boss, rightBoss, GateKind.RightGate, 2, "REGION_4");
+                    centerNode.Initialize(ChapterNodeType.Boss, skipBoss, GateKind.SkipGate, 3, "REGION_7");
                 }
                 else
                 {
@@ -325,33 +388,126 @@ namespace Game.World
                 if (_nodes.ContainsKey(bossCoords))
                 {
                     pickedBossIdsByGate.TryGetValue(GateKind.None, out var bossId);
-                    _nodes[bossCoords].Initialize(ChapterNodeType.Boss, bossId);
+                    _nodes[bossCoords].Initialize(ChapterNodeType.Boss, bossId, GateKind.None, NextActForCurrentAct(), NextRegionForCurrentAct());
                 }
             }
 
             // 3. Random Content (Elites, Merchants, Mystery)
-            var validCandidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();
-            validCandidates.Sort((a, b) => Game.Common.GameRandom.Range(0, 2) == 0 ? -1 : 1);
+            var candidates = _nodes.Values.Where(n => n.type == ChapterNodeType.NormalEnemy).ToList();
+            ShuffleInPlace(candidates);
 
-            int assigned = 0;
-            for (int i = 0; i < eliteCount && assigned < validCandidates.Count; i++)
-                validCandidates[assigned++].Initialize(ChapterNodeType.EliteEnemy);
+            int eliteCount = _activeSettings != null ? _activeSettings.eliteCount : 0;
+            int merchantCount = _activeSettings != null ? _activeSettings.merchantCount : 0;
+            int mysteryCount = _activeSettings != null ? _activeSettings.mysteryCount : 0;
+            int emptyCount = _activeSettings != null ? _activeSettings.emptyCount : 0;
 
-            for (int i = 0; i < merchantCount && assigned < validCandidates.Count; i++)
-                validCandidates[assigned++].Initialize(ChapterNodeType.Merchant);
+            int noEliteBottomRows = _activeSettings != null ? Mathf.Max(0, _activeSettings.noEliteBottomRows) : 0;
+            int merchantMinSeparation = _activeSettings != null ? Mathf.Max(0, _activeSettings.merchantMinSeparation) : 0;
 
-            for (int i = 0; i < mysteryCount && assigned < validCandidates.Count; i++)
-                validCandidates[assigned++].Initialize(ChapterNodeType.Mystery);
+            // Rule 1: bottom X rows cannot contain elites.
+            int eliteMinAllowedRow = _minRow + noEliteBottomRows;
 
-            for (int i = 0; i < emptyCount && assigned < validCandidates.Count; i++)
-                validCandidates[assigned++].Initialize(ChapterNodeType.Empty);
+            int elitesPlaced = 0;
+            for (int i = candidates.Count - 1; i >= 0 && elitesPlaced < eliteCount; i--)
+            {
+                var node = candidates[i];
+                if (node == null) { candidates.RemoveAt(i); continue; }
+                var coords = GetCoords(node);
+                if (coords.r < eliteMinAllowedRow) continue;
+                node.Initialize(ChapterNodeType.EliteEnemy);
+                candidates.RemoveAt(i);
+                elitesPlaced++;
+            }
+            if (elitesPlaced < eliteCount)
+            {
+                Debug.LogWarning($"[ChapterMapManager] Could not place all elites. Requested={eliteCount}, placed={elitesPlaced}. Rule noEliteBottomRows={noEliteBottomRows} may be too strict for this grid.");
+            }
+
+            // Rule 2: merchants must be spaced apart (hex distance) strictly greater than X.
+            int merchantsPlaced = 0;
+            var merchantCoords = new List<HexCoords>();
+            for (int i = candidates.Count - 1; i >= 0 && merchantsPlaced < merchantCount; i--)
+            {
+                var node = candidates[i];
+                if (node == null) { candidates.RemoveAt(i); continue; }
+                var coords = GetCoords(node);
+
+                bool ok = true;
+                if (merchantMinSeparation > 0)
+                {
+                    for (int m = 0; m < merchantCoords.Count; m++)
+                    {
+                        if (coords.DistanceTo(merchantCoords[m]) <= merchantMinSeparation)
+                        {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (!ok) continue;
+
+                node.Initialize(ChapterNodeType.Merchant);
+                candidates.RemoveAt(i);
+                merchantCoords.Add(coords);
+                merchantsPlaced++;
+            }
+            if (merchantsPlaced < merchantCount)
+            {
+                Debug.LogWarning($"[ChapterMapManager] Could not place all merchants. Requested={merchantCount}, placed={merchantsPlaced}. Rule merchantMinSeparation={merchantMinSeparation} may be too strict for this grid.");
+            }
+
+            // Remaining types: place freely.
+            int mysteriesPlaced = 0;
+            for (int i = candidates.Count - 1; i >= 0 && mysteriesPlaced < mysteryCount; i--)
+            {
+                var node = candidates[i];
+                if (node == null) { candidates.RemoveAt(i); continue; }
+                node.Initialize(ChapterNodeType.Mystery);
+                candidates.RemoveAt(i);
+                mysteriesPlaced++;
+            }
+
+            int emptiesPlaced = 0;
+            for (int i = candidates.Count - 1; i >= 0 && emptiesPlaced < emptyCount; i--)
+            {
+                var node = candidates[i];
+                if (node == null) { candidates.RemoveAt(i); continue; }
+                node.Initialize(ChapterNodeType.Empty);
+                candidates.RemoveAt(i);
+                emptiesPlaced++;
+            }
 
             ApplyIconsToAllNodes();
 
             if (logNodeSummaryOnGenerate)
             {
-                DumpNodeSummary();
+                StartCoroutine(DumpNodeSummaryNextFrame());
             }
+        }
+
+        private static void ShuffleInPlace<T>(List<T> list)
+        {
+            if (list == null || list.Count <= 1) return;
+            for (int i = list.Count - 1; i > 0; i--)
+            {
+                int j = Game.Common.GameRandom.Range(0, i + 1);
+                (list[i], list[j]) = (list[j], list[i]);
+            }
+        }
+
+        private static HexCoords GetCoords(ChapterNode node)
+        {
+            if (node == null) return default;
+            var cell = node.GetComponent<HexCell>();
+            return cell != null ? cell.Coords : default;
+        }
+
+        private IEnumerator DumpNodeSummaryNextFrame()
+        {
+            // Wait a frame so any Destroy() calls have taken effect.
+            yield return null;
+            DumpNodeSummary();
         }
 
         [ContextMenu("Debug/Dump Node Summary")]
@@ -367,8 +523,18 @@ namespace Game.World
             int withAnyIconMapping = 0;
             int missingIconMapping = 0;
 
+            int iconRootsFound = 0;
+            int iconModelsFound = 0;
+            int iconModelsInactive = 0;
+            int renderersFound = 0;
+            int renderersEnabled = 0;
+            int mappedButNoIconObject = 0;
+
             int missingListed = 0;
             System.Text.StringBuilder missingSb = null;
+
+            int mappedMissingListed = 0;
+            System.Text.StringBuilder mappedMissingSb = null;
 
             foreach (var kvp in _nodes)
             {
@@ -404,6 +570,56 @@ namespace Game.World
                         missingListed++;
                     }
                 }
+
+                // Count actual icon objects in hierarchy.
+                Transform iconRoot = null;
+                for (int i = 0; i < node.transform.childCount; i++)
+                {
+                    var child = node.transform.GetChild(i);
+                    if (child != null && child.name.StartsWith("ChapterNodeIcon", System.StringComparison.Ordinal))
+                    {
+                        iconRoot = child;
+                        break;
+                    }
+                }
+
+                if (iconRoot != null)
+                {
+                    iconRootsFound++;
+                    if (iconRoot.childCount > 0)
+                    {
+                        iconModelsFound += iconRoot.childCount;
+                        for (int i = 0; i < iconRoot.childCount; i++)
+                        {
+                            var child = iconRoot.GetChild(i);
+                            if (child == null) continue;
+                            if (!child.gameObject.activeInHierarchy) iconModelsInactive++;
+
+                            var rs = child.GetComponentsInChildren<Renderer>(true);
+                            if (rs != null && rs.Length > 0)
+                            {
+                                renderersFound += rs.Length;
+                                foreach (var r in rs)
+                                {
+                                    if (r != null && r.enabled) renderersEnabled++;
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (hasMapping)
+                {
+                    // If mapping exists but no icon object exists, something is deleting icons or ApplyIcon isn't running.
+                    mappedButNoIconObject++;
+                    if (mappedMissingListed < debugMaxMissingIconLogs)
+                    {
+                        mappedMissingSb ??= new System.Text.StringBuilder();
+                        var cell = node.GetComponent<HexCell>();
+                        var coords = cell != null ? cell.Coords : default;
+                        mappedMissingSb.AppendLine($"- {coords.q},{coords.r} type={node.type} (mapping exists, but no ChapterNodeIcon_* child)");
+                        mappedMissingListed++;
+                    }
+                }
             }
 
             var sb = new System.Text.StringBuilder();
@@ -411,6 +627,8 @@ namespace Game.World
             sb.AppendLine($"- nodeIconLibrary={(nodeIconLibrary != null ? nodeIconLibrary.name : "(null)")}");
             sb.AppendLine($"- bossIconLibrary={(bossIconLibrary != null ? bossIconLibrary.name : "(null)")}");
             sb.AppendLine($"- iconMapping: mapped={withAnyIconMapping}, missing={missingIconMapping}");
+            sb.AppendLine($"- iconObjects: iconRoots={iconRootsFound}, iconModels={iconModelsFound}, mappedButNoIconObject={mappedButNoIconObject}");
+            sb.AppendLine($"- iconVisibility: iconModelsInactive={iconModelsInactive}, renderersFound={renderersFound}, renderersEnabled={renderersEnabled}");
             sb.AppendLine("- counts:");
             foreach (var kv in counts.OrderBy(k => k.Key.ToString()))
             {
@@ -423,6 +641,12 @@ namespace Game.World
                 sb.Append(missingSb.ToString());
             }
 
+            if (mappedMissingSb != null)
+            {
+                sb.AppendLine("- first mapped nodes missing icon objects:");
+                sb.Append(mappedMissingSb.ToString());
+            }
+
             Debug.Log(sb.ToString());
         }
 
@@ -433,13 +657,20 @@ namespace Game.World
             if (!Application.isPlaying) return;
             if (_nodes == null || _nodes.Count == 0) return;
 
+            Gizmos.color = new Color(1f, 1f, 1f, 0.5f);
             UnityEditor.Handles.color = Color.white;
             foreach (var kvp in _nodes)
             {
                 var node = kvp.Value;
                 if (node == null) continue;
                 var pos = node.transform.position + Vector3.up * 0.2f;
-                UnityEditor.Handles.Label(pos, node.type.ToString());
+                Gizmos.DrawSphere(pos, 0.05f);
+
+                // Labels are drawn only when this manager is selected to reduce clutter and avoid Gizmos filtering surprises.
+                if (UnityEditor.Selection.activeGameObject == gameObject)
+                {
+                    UnityEditor.Handles.Label(pos, node.type.ToString());
+                }
             }
         }
 #endif
@@ -448,54 +679,92 @@ namespace Game.World
         {
             var result = new Dictionary<GateKind, string>();
 
-            // If a profile is configured, use it.
-            if (_bossProfile != null)
+            if (bossIconLibrary == null) return result;
+
+            var allBossIds = BossIconLibrary.LoadBossIdsFromLocalization();
+            if (allBossIds == null || allBossIds.Length == 0) return result;
+
+            var regionId = FlowContext.CurrentChapterId;
+            int regionNumber = TryGetRegionNumber(regionId);
+            int act = FlowContext.CurrentAct;
+
+            // Deterministic RNG per slot.
+            string PickFromPrefix(string prefix, int salt)
             {
-                var used = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-                foreach (var slot in _bossProfile.slots)
-                {
-                    string id = PickBossIdFromProfile(slot.kind, used);
-                    if (!string.IsNullOrEmpty(id)) result[slot.gateKind] = id;
-                }
-                return result;
+                var pool = allBossIds.Where(id => !string.IsNullOrEmpty(id) && id.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase)).ToList();
+                if (pool.Count == 0) return null;
+                var rng = new System.Random(unchecked(_currentSeed * 19349663) ^ salt);
+                return pool[rng.Next(0, pool.Count)];
             }
 
-            // Fallback: pick one boss id for the map (used for single boss only).
-            if (bossIconLibrary != null)
+            if (_activeSettings != null && _activeSettings.IsAct1)
             {
-                var id = bossIconLibrary.PickBossId(_currentSeed);
-                if (!string.IsNullOrEmpty(id)) result[GateKind.None] = id;
+                // Act1: left/right -> Act2, skip -> Act3.
+                if (regionNumber >= 1 && regionNumber <= 6)
+                {
+                    var prefixTo2 = $"BOSS_R{regionNumber}_TOACT2_";
+                    var prefixTo3 = $"BOSS_R{regionNumber}_TOACT3_";
+
+                    var left = PickFromPrefix(prefixTo2, unchecked((int)0x13579BDF));
+                    var right = PickFromPrefix(prefixTo2, unchecked((int)0x2468ACE0));
+                    var skip = PickFromPrefix(prefixTo3, unchecked((int)0xDEADBEEF));
+
+                    if (!string.IsNullOrEmpty(left)) result[GateKind.LeftGate] = left;
+                    if (!string.IsNullOrEmpty(right)) result[GateKind.RightGate] = right;
+                    if (!string.IsNullOrEmpty(skip)) result[GateKind.SkipGate] = skip;
+                }
             }
+            else
+            {
+                // Act2+: single boss.
+                string bossId = null;
+                if (act == 2 && regionNumber >= 1 && regionNumber <= 6)
+                {
+                    bossId = PickFromPrefix($"BOSS_R{regionNumber}_TOACT3_", unchecked((int)0x0F00BA11));
+                }
+                else if (act == 3)
+                {
+                    bossId = PickFromPrefix("BOSS_R7_", unchecked((int)0x00C0FFEE));
+                }
+                else if (act == 4)
+                {
+                    bossId = PickFromPrefix("BOSS_R8", unchecked((int)0xBADC0DE));
+                    if (string.IsNullOrEmpty(bossId)) bossId = "BOSS_R8";
+                }
+                else
+                {
+                    bossId = bossIconLibrary.PickBossId(_currentSeed);
+                }
+
+                if (!string.IsNullOrEmpty(bossId)) result[GateKind.None] = bossId;
+            }
+
             return result;
         }
 
-        private string PickBossIdFromProfile(BossSelectionProfile.SlotKind kind, HashSet<string> used)
+        private static int TryGetRegionNumber(string regionId)
         {
-            if (_bossProfile == null) return null;
+            if (string.IsNullOrEmpty(regionId)) return 0;
+            if (!regionId.StartsWith("REGION_", System.StringComparison.OrdinalIgnoreCase)) return 0;
+            var suffix = regionId.Substring("REGION_".Length);
+            return int.TryParse(suffix, out var n) ? n : 0;
+        }
 
-            if (kind == BossSelectionProfile.SlotKind.Final && !string.IsNullOrEmpty(_bossProfile.fixedFinalBossId))
-            {
-                return _bossProfile.fixedFinalBossId;
-            }
+        private static int NextActForCurrentAct()
+        {
+            var act = FlowContext.CurrentAct;
+            if (act == 1) return 2;
+            if (act == 2) return 3;
+            if (act == 3) return 4;
+            return 0;
+        }
 
-            var pool = _bossProfile.GetPool(kind);
-            if (pool == null || pool.Count == 0) return null;
-
-            var rng = new System.Random(unchecked(_currentSeed * 19349663) ^ (int)kind * 83492791);
-            // Try a few times to avoid duplicates.
-            for (int i = 0; i < 16; i++)
-            {
-                var candidate = pool[rng.Next(0, pool.Count)];
-                if (string.IsNullOrEmpty(candidate)) continue;
-                if (_bossProfile.avoidDuplicates && used.Contains(candidate)) continue;
-                used.Add(candidate);
-                return candidate;
-            }
-
-            // Give up and allow duplicates.
-            var fallback = pool[rng.Next(0, pool.Count)];
-            if (!string.IsNullOrEmpty(fallback)) used.Add(fallback);
-            return fallback;
+        private static string NextRegionForCurrentAct()
+        {
+            var act = FlowContext.CurrentAct;
+            if (act == 2) return "REGION_7";
+            if (act == 3) return "REGION_8";
+            return null;
         }
 
         private void ApplyIconsToAllNodes()
@@ -583,7 +852,9 @@ namespace Game.World
             }
 
             _playerMoveCount++;
-            if (_playerMoveCount % movesPerTideStep == 0)
+
+            int step = _activeSettings != null ? _activeSettings.movesPerTideStep : 0;
+            if (step > 0 && _playerMoveCount % step == 0)
             {
                 StartCoroutine(RaiseTideRoutine());
             }
@@ -591,7 +862,8 @@ namespace Game.World
 
         IEnumerator RaiseTideRoutine()
         {
-            yield return new WaitForSeconds(tideAnimationDelay);
+            float delay = _activeSettings != null ? _activeSettings.tideAnimationDelay : 0f;
+            yield return new WaitForSeconds(delay);
             _currentTideRow++;
             UpdateTideVisuals();
             CheckPlayerTrapped();

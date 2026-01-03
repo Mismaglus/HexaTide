@@ -22,6 +22,7 @@ namespace Game.World
     {
         public ReturnPolicy policy;
         public GateKind gateKind;
+        public int nextAct;
         public string nextChapterId;
         public string specificEventId;
 

@@ -15,7 +15,12 @@ namespace Game.World
         public static int MapSeed;
 
         // Keep track of which chapter this runtime data belongs to.
+        // NOTE: In the new model, this is a REGION_* id (kept for compatibility).
         public static string CurrentChapterId;
+
+        // Act/Region routing state (new).
+        public static int CurrentAct;
+        public static string CurrentRegionId;
 
         // Dynamic State
         public static HexCoords PlayerPosition;
@@ -43,6 +48,8 @@ namespace Game.World
             CurrentTideRow = tideRow;
             MovesTaken = moves;
             CurrentChapterId = chapterId;
+            CurrentRegionId = chapterId;
+            CurrentAct = FlowContext.CurrentAct;
 
             ClearedNodes.Clear();
             if (cleared != null)
@@ -59,6 +66,8 @@ namespace Game.World
             HasData = false;
             ClearedNodes.Clear();
             CurrentChapterId = null;
+            CurrentRegionId = null;
+            CurrentAct = 0;
         }
     }
 }

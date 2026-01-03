@@ -20,16 +20,6 @@ namespace Game.World
         [Header("Mapping")]
         public List<Entry> entries = new List<Entry>();
 
-        [Header("Placement")]
-        [Tooltip("Local offset relative to the node/tile transform.")]
-        public Vector3 localOffset = new Vector3(0f, 0.05f, 0f);
-
-        [Tooltip("Local rotation (Euler) for the icon root object.")]
-        public Vector3 localEuler = Vector3.zero;
-
-        [Tooltip("Local uniform scale for the icon root object.")]
-        public float localScale = 1f;
-
         private Dictionary<ChapterNodeType, GameObject> _cache;
 
         private void OnEnable() => RebuildCache();

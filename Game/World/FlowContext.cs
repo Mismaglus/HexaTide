@@ -7,10 +7,15 @@ namespace Game.World
     public static class FlowContext
     {
         /// <summary>
-        /// The identifier of the chapter that should be loaded when MapScene starts.
-        /// When exiting a chapter via a gate, BattleOutcomeUI should set this before loading MapScene.
+        /// Current act index (1..4). MapScene uses this to select act-specific ChapterSettings.
         /// This value persists across scene loads until overwritten.
         /// </summary>
-        public static string CurrentChapterId;
+        public static int CurrentAct = 1;
+
+        /// <summary>
+        /// Current region id (e.g., "REGION_1".."REGION_8").
+        /// Historically this field was called "chapter"; keep the name for compatibility.
+        /// </summary>
+        public static string CurrentChapterId = "REGION_1";
     }
 }

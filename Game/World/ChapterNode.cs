@@ -15,9 +15,8 @@ namespace Game.World
         Mystery,
         Treasure,
         Boss,
-        Gate_Left,
-        Gate_Right,
-        Gate_Skip
+        Camp,
+        Empty
     }
 
     [RequireComponent(typeof(HexCell))]
@@ -29,15 +28,21 @@ namespace Game.World
         // Optional content identity for Boss nodes (e.g., "BOSS_001").
         public string BossId { get; private set; }
 
+        // Optional exit info for boss nodes that act like chapter gates (Act1 routing).
+        public GateKind ExitGateKind { get; private set; } = GateKind.None;
+        public string NextChapterId { get; private set; }
+
         private HexCell _cell;
 
         private const string ICON_NAME_PREFIX = "ChapterNodeIcon";
 
-        public void Initialize(ChapterNodeType nodeType, string bossId = null)
+        public void Initialize(ChapterNodeType nodeType, string bossId = null, GateKind exitGateKind = GateKind.None, string nextChapterId = null)
         {
             type = nodeType;
             isCleared = false;
             BossId = string.IsNullOrEmpty(bossId) ? null : bossId;
+            ExitGateKind = exitGateKind;
+            NextChapterId = string.IsNullOrEmpty(nextChapterId) ? null : nextChapterId;
             _cell = GetComponent<HexCell>();
             _cell.RefreshFogVisuals();
         }
@@ -103,9 +108,10 @@ namespace Game.World
             }
 
             // Placement: always relative to the tile/node transform (stable regardless of CenterOffset)
-            Vector3 localOffset = library.localOffset;
-            Vector3 localEuler = library.localEuler;
-            float localScale = Mathf.Max(0.0001f, library.localScale);
+            // If no node icon library is provided, fall back to sensible defaults.
+            Vector3 localOffset = library != null ? library.localOffset : new Vector3(0f, 0.05f, 0f);
+            Vector3 localEuler = library != null ? library.localEuler : Vector3.zero;
+            float localScale = Mathf.Max(0.0001f, library != null ? library.localScale : 1f);
 
             iconTransform.localPosition = localOffset;
             iconTransform.localRotation = Quaternion.Euler(localEuler);
@@ -194,6 +200,12 @@ namespace Game.World
         {
             if (isCleared) return;
 
+            if (type == ChapterNodeType.Empty)
+            {
+                SetCleared(true);
+                return;
+            }
+
             var ctx = new EncounterContext();
             ctx.bossId = BossId;
 
@@ -225,29 +237,11 @@ namespace Game.World
                     ctx.policy = ReturnPolicy.ReturnToChapter;
                     ctx.gateKind = GateKind.None;
                     break;
-                case ChapterNodeType.Gate_Left:
-                    ctx.rewardProfileId = "BossGate";
-                    ctx.policy = ReturnPolicy.ExitChapter;
-                    ctx.gateKind = GateKind.LeftGate;
-                    ctx.nextChapterId = "Act2_LeftBiome";
-                    break;
-                case ChapterNodeType.Gate_Right:
-                    ctx.rewardProfileId = "BossGate";
-                    ctx.policy = ReturnPolicy.ExitChapter;
-                    ctx.gateKind = GateKind.RightGate;
-                    ctx.nextChapterId = "Act2_RightBiome";
-                    break;
-                case ChapterNodeType.Gate_Skip:
-                    ctx.rewardProfileId = "BossGate";
-                    ctx.policy = ReturnPolicy.ExitChapter;
-                    ctx.gateKind = GateKind.SkipGate;
-                    ctx.nextChapterId = "Act3_StarreachPeak";
-                    break;
                 case ChapterNodeType.Boss:
                     ctx.rewardProfileId = "BossGate";
                     ctx.policy = ReturnPolicy.ExitChapter;
-                    ctx.gateKind = GateKind.None;
-                    ctx.nextChapterId = null; // 后续由 BattleOutcomeUI 决定去哪里
+                    ctx.gateKind = ExitGateKind;
+                    ctx.nextChapterId = NextChapterId; // If null/empty, BattleOutcomeUI may choose by gateKind.
                     break;
                 default:
                     ctx.rewardProfileId = "Normal";

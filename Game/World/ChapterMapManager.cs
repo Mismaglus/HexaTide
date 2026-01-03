@@ -26,6 +26,9 @@ namespace Game.World
         public int merchantCount = 2;
         public int mysteryCount = 4;
 
+        [Tooltip("Number of empty tiles to place (reduces map density). Empty tiles have no encounter.")]
+        public int emptyCount = 6;
+
         [Header("Act Settings")]
         public bool isAct1 = true; // Simple toggle for now to distinguish generation logic
 
@@ -42,6 +45,16 @@ namespace Game.World
 
         [Tooltip("Optional boss-specific icon mapping (bossId -> prefab). Boss roster (ids) is read from localization Bosses.json.")]
         public BossIconLibrary bossIconLibrary;
+
+        [Header("Debug")]
+        [Tooltip("If enabled, prints a summary of node types and icon-mapping coverage after generation.")]
+        public bool logNodeSummaryOnGenerate = false;
+
+        [Tooltip("If enabled (Editor only, Play Mode), draws node type labels in the Scene View.")]
+        public bool drawNodeTypeLabelsInSceneView = false;
+
+        [Tooltip("Max number of nodes listed when logging missing icon mappings.")]
+        public int debugMaxMissingIconLogs = 20;
 
         // Runtime State
         private int _currentSeed;
@@ -251,6 +264,11 @@ namespace Game.World
             // Create placeholder icons immediately (will be updated after AssignContent)
             ApplyIconsToAllNodes();
 
+            if (logNodeSummaryOnGenerate)
+            {
+                DumpNodeSummary();
+            }
+
             Debug.Log($"[ChapterMapManager] Generated {_nodes.Count} nodes. MinRow={_minRow}, MaxRow={_maxRow}.");
         }
 
@@ -271,7 +289,7 @@ namespace Game.World
             // 2. Boss / Gates (Top Row)
             if (isAct1)
             {
-                // Act 1: Left Gate, Skip Gate (Center), Right Gate
+                // Act 1: Three boss nodes on the top row that act as exits (left/right/skip).
                 if (topRowNodes.Count >= 3)
                 {
                     // Sort by Q to find Left/Right
@@ -281,16 +299,13 @@ namespace Game.World
                     var rightNode = topRowNodes[topRowNodes.Count - 1];
                     var centerNode = topRowNodes[topRowNodes.Count / 2];
 
-                    leftNode.Initialize(ChapterNodeType.Gate_Left);
-                    rightNode.Initialize(ChapterNodeType.Gate_Right);
-                    centerNode.Initialize(ChapterNodeType.Gate_Skip);
+                    pickedBossIdsByGate.TryGetValue(GateKind.LeftGate, out var leftBoss);
+                    pickedBossIdsByGate.TryGetValue(GateKind.RightGate, out var rightBoss);
+                    pickedBossIdsByGate.TryGetValue(GateKind.SkipGate, out var skipBoss);
 
-                    if (pickedBossIdsByGate.TryGetValue(GateKind.LeftGate, out var leftBoss))
-                        leftNode.Initialize(ChapterNodeType.Gate_Left, leftBoss);
-                    if (pickedBossIdsByGate.TryGetValue(GateKind.RightGate, out var rightBoss))
-                        rightNode.Initialize(ChapterNodeType.Gate_Right, rightBoss);
-                    if (pickedBossIdsByGate.TryGetValue(GateKind.SkipGate, out var skipBoss))
-                        centerNode.Initialize(ChapterNodeType.Gate_Skip, skipBoss);
+                    leftNode.Initialize(ChapterNodeType.Boss, leftBoss, GateKind.LeftGate, "Act2_LeftBiome");
+                    rightNode.Initialize(ChapterNodeType.Boss, rightBoss, GateKind.RightGate, "Act2_RightBiome");
+                    centerNode.Initialize(ChapterNodeType.Boss, skipBoss, GateKind.SkipGate, "Act3_StarreachPeak");
                 }
                 else
                 {
@@ -328,8 +343,106 @@ namespace Game.World
             for (int i = 0; i < mysteryCount && assigned < validCandidates.Count; i++)
                 validCandidates[assigned++].Initialize(ChapterNodeType.Mystery);
 
+            for (int i = 0; i < emptyCount && assigned < validCandidates.Count; i++)
+                validCandidates[assigned++].Initialize(ChapterNodeType.Empty);
+
             ApplyIconsToAllNodes();
+
+            if (logNodeSummaryOnGenerate)
+            {
+                DumpNodeSummary();
+            }
         }
+
+        [ContextMenu("Debug/Dump Node Summary")]
+        public void DumpNodeSummary()
+        {
+            if (_nodes == null || _nodes.Count == 0)
+            {
+                Debug.Log("[ChapterMapManager] DumpNodeSummary: no nodes (run in Play Mode after grid generation). ");
+                return;
+            }
+
+            var counts = new Dictionary<ChapterNodeType, int>();
+            int withAnyIconMapping = 0;
+            int missingIconMapping = 0;
+
+            int missingListed = 0;
+            System.Text.StringBuilder missingSb = null;
+
+            foreach (var kvp in _nodes)
+            {
+                var node = kvp.Value;
+                if (node == null) continue;
+
+                counts.TryGetValue(node.type, out int c);
+                counts[node.type] = c + 1;
+
+                bool hasBossPrefab = false;
+                if (!string.IsNullOrEmpty(node.BossId) && bossIconLibrary != null)
+                {
+                    hasBossPrefab = bossIconLibrary.TryGetPrefab(node.BossId, out var bossPrefab) && bossPrefab != null;
+                }
+
+                bool hasNodePrefab = false;
+                if (nodeIconLibrary != null)
+                {
+                    hasNodePrefab = nodeIconLibrary.TryGetPrefab(node.type, out var nodePrefab) && nodePrefab != null;
+                }
+
+                bool hasMapping = hasBossPrefab || hasNodePrefab;
+                if (hasMapping) withAnyIconMapping++;
+                else
+                {
+                    missingIconMapping++;
+                    if (missingListed < debugMaxMissingIconLogs)
+                    {
+                        missingSb ??= new System.Text.StringBuilder();
+                        var cell = node.GetComponent<HexCell>();
+                        var coords = cell != null ? cell.Coords : default;
+                        missingSb.AppendLine($"- {coords.q},{coords.r} type={node.type} bossId={(string.IsNullOrEmpty(node.BossId) ? "(none)" : node.BossId)}");
+                        missingListed++;
+                    }
+                }
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[ChapterMapManager] Node Summary (nodes={_nodes.Count})");
+            sb.AppendLine($"- nodeIconLibrary={(nodeIconLibrary != null ? nodeIconLibrary.name : "(null)")}");
+            sb.AppendLine($"- bossIconLibrary={(bossIconLibrary != null ? bossIconLibrary.name : "(null)")}");
+            sb.AppendLine($"- iconMapping: mapped={withAnyIconMapping}, missing={missingIconMapping}");
+            sb.AppendLine("- counts:");
+            foreach (var kv in counts.OrderBy(k => k.Key.ToString()))
+            {
+                sb.AppendLine($"  - {kv.Key}: {kv.Value}");
+            }
+
+            if (missingSb != null)
+            {
+                sb.AppendLine("- first missing icon mappings:");
+                sb.Append(missingSb.ToString());
+            }
+
+            Debug.Log(sb.ToString());
+        }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmos()
+        {
+            if (!drawNodeTypeLabelsInSceneView) return;
+            if (!Application.isPlaying) return;
+            if (_nodes == null || _nodes.Count == 0) return;
+
+            UnityEditor.Handles.color = Color.white;
+            foreach (var kvp in _nodes)
+            {
+                var node = kvp.Value;
+                if (node == null) continue;
+                var pos = node.transform.position + Vector3.up * 0.2f;
+                UnityEditor.Handles.Label(pos, node.type.ToString());
+            }
+        }
+#endif
 
         private Dictionary<GateKind, string> PickBossIdsForSlots()
         {

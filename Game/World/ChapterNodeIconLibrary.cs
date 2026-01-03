@@ -51,6 +51,7 @@ namespace Game.World
 
         public bool TryGetPrefab(ChapterNodeType type, out GameObject prefab)
         {
+            if (_cache == null) RebuildCache();
             if (_cache != null && _cache.TryGetValue(type, out prefab)) return prefab != null;
             prefab = null;
             return false;

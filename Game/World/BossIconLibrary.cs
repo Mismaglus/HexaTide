@@ -89,6 +89,7 @@ namespace Game.World
         public bool TryGetPrefab(string bossId, out GameObject prefab)
         {
             prefab = null;
+            if (_prefabById == null) RebuildCache();
             if (!string.IsNullOrEmpty(bossId) && _prefabById != null && _prefabById.TryGetValue(bossId, out prefab) && prefab != null)
                 return true;
 

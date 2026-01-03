@@ -27,6 +27,10 @@ namespace Game.World
         [Tooltip("Number of mystery nodes to place on the map.")]
         public int mysteryCount = 4;
 
+        [Header("Boss Selection")]
+        [Tooltip("Optional boss selection profile for this chapter/region variant. Used to assign BossId to gate/boss nodes and drive boss icons.")]
+        public BossSelectionProfile bossSelectionProfile;
+
         [Header("Tide Settings")]
         [Tooltip("Number of player moves before the tide rises by one row.")]
         public int movesPerTideStep = 3;

@@ -269,6 +269,8 @@ namespace Game.EditorTools
             {
                 string rid = string.IsNullOrEmpty(ctx.Value.rewardProfileId) ? "None" : ctx.Value.rewardProfileId;
                 EditorGUILayout.LabelField($"EncounterContext.rewardProfileId: {rid}", EditorStyles.miniLabel);
+                string bid = string.IsNullOrEmpty(ctx.Value.bossId) ? "None" : ctx.Value.bossId;
+                EditorGUILayout.LabelField($"EncounterContext.bossId: {bid}", EditorStyles.miniLabel);
             }
             else
             {

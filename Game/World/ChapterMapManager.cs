@@ -36,6 +36,13 @@ namespace Game.World
         [Tooltip("Fallback settings if DB lookup fails or FlowContext is empty.")]
         public ChapterSettings defaultSettings;
 
+        [Header("Node Icon Layer (MVP)")]
+        [Tooltip("Optional icon mapping for ChapterNodeType -> 3D prefab. If a type is not mapped, no icon will be shown for that node.")]
+        public ChapterNodeIconLibrary nodeIconLibrary;
+
+        [Tooltip("Optional boss-specific icon mapping (bossId -> prefab). Boss roster (ids) is read from localization Bosses.json.")]
+        public BossIconLibrary bossIconLibrary;
+
         // Runtime State
         private int _currentSeed;
         private int _playerMoveCount = 0;
@@ -46,6 +53,8 @@ namespace Game.World
         private Unit _playerUnit;
         private static readonly HexCoordsComparer _hexComparer = new HexCoordsComparer();
         private Dictionary<HexCoords, ChapterNode> _nodes = new Dictionary<HexCoords, ChapterNode>(_hexComparer);
+
+        private BossSelectionProfile _bossProfile;
 
         public int CurrentTideRow => _currentTideRow;
         public int MovesBeforeNextTide => movesPerTideStep - (_playerMoveCount % movesPerTideStep);
@@ -163,6 +172,8 @@ namespace Game.World
             {
                 mapRecipe = settings.gridRecipe;
             }
+
+            _bossProfile = settings.bossSelectionProfile;
         }
 
         // =========================================================
@@ -237,12 +248,18 @@ namespace Game.World
                 node.Initialize(ChapterNodeType.NormalEnemy);
             }
 
+            // Create placeholder icons immediately (will be updated after AssignContent)
+            ApplyIconsToAllNodes();
+
             Debug.Log($"[ChapterMapManager] Generated {_nodes.Count} nodes. MinRow={_minRow}, MaxRow={_maxRow}.");
         }
 
         void AssignContent()
         {
             Game.Common.GameRandom.Init(_currentSeed);
+
+            // Pre-pick boss ids for this map (one per slot) so icon + gameplay are consistent.
+            var pickedBossIdsByGate = PickBossIdsForSlots();
 
             var bottomRowNodes = GetNodesInRow(_minRow);
             var topRowNodes = GetNodesInRow(_maxRow);
@@ -267,19 +284,34 @@ namespace Game.World
                     leftNode.Initialize(ChapterNodeType.Gate_Left);
                     rightNode.Initialize(ChapterNodeType.Gate_Right);
                     centerNode.Initialize(ChapterNodeType.Gate_Skip);
+
+                    if (pickedBossIdsByGate.TryGetValue(GateKind.LeftGate, out var leftBoss))
+                        leftNode.Initialize(ChapterNodeType.Gate_Left, leftBoss);
+                    if (pickedBossIdsByGate.TryGetValue(GateKind.RightGate, out var rightBoss))
+                        rightNode.Initialize(ChapterNodeType.Gate_Right, rightBoss);
+                    if (pickedBossIdsByGate.TryGetValue(GateKind.SkipGate, out var skipBoss))
+                        centerNode.Initialize(ChapterNodeType.Gate_Skip, skipBoss);
                 }
                 else
                 {
                     Debug.LogWarning("Top row too narrow for 3 gates, placing single Boss.");
                     HexCoords bossCoords = GetCenterOfRow(topRowNodes);
-                    if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
+                    if (_nodes.ContainsKey(bossCoords))
+                    {
+                        pickedBossIdsByGate.TryGetValue(GateKind.None, out var bossId);
+                        _nodes[bossCoords].Initialize(ChapterNodeType.Boss, bossId);
+                    }
                 }
             }
             else
             {
                 // Act 2+: Single Boss at top
                 HexCoords bossCoords = GetCenterOfRow(topRowNodes);
-                if (_nodes.ContainsKey(bossCoords)) _nodes[bossCoords].Initialize(ChapterNodeType.Boss);
+                if (_nodes.ContainsKey(bossCoords))
+                {
+                    pickedBossIdsByGate.TryGetValue(GateKind.None, out var bossId);
+                    _nodes[bossCoords].Initialize(ChapterNodeType.Boss, bossId);
+                }
             }
 
             // 3. Random Content (Elites, Merchants, Mystery)
@@ -295,6 +327,71 @@ namespace Game.World
 
             for (int i = 0; i < mysteryCount && assigned < validCandidates.Count; i++)
                 validCandidates[assigned++].Initialize(ChapterNodeType.Mystery);
+
+            ApplyIconsToAllNodes();
+        }
+
+        private Dictionary<GateKind, string> PickBossIdsForSlots()
+        {
+            var result = new Dictionary<GateKind, string>();
+
+            // If a profile is configured, use it.
+            if (_bossProfile != null)
+            {
+                var used = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                foreach (var slot in _bossProfile.slots)
+                {
+                    string id = PickBossIdFromProfile(slot.kind, used);
+                    if (!string.IsNullOrEmpty(id)) result[slot.gateKind] = id;
+                }
+                return result;
+            }
+
+            // Fallback: pick one boss id for the map (used for single boss only).
+            if (bossIconLibrary != null)
+            {
+                var id = bossIconLibrary.PickBossId(_currentSeed);
+                if (!string.IsNullOrEmpty(id)) result[GateKind.None] = id;
+            }
+            return result;
+        }
+
+        private string PickBossIdFromProfile(BossSelectionProfile.SlotKind kind, HashSet<string> used)
+        {
+            if (_bossProfile == null) return null;
+
+            if (kind == BossSelectionProfile.SlotKind.Final && !string.IsNullOrEmpty(_bossProfile.fixedFinalBossId))
+            {
+                return _bossProfile.fixedFinalBossId;
+            }
+
+            var pool = _bossProfile.GetPool(kind);
+            if (pool == null || pool.Count == 0) return null;
+
+            var rng = new System.Random(unchecked(_currentSeed * 19349663) ^ (int)kind * 83492791);
+            // Try a few times to avoid duplicates.
+            for (int i = 0; i < 16; i++)
+            {
+                var candidate = pool[rng.Next(0, pool.Count)];
+                if (string.IsNullOrEmpty(candidate)) continue;
+                if (_bossProfile.avoidDuplicates && used.Contains(candidate)) continue;
+                used.Add(candidate);
+                return candidate;
+            }
+
+            // Give up and allow duplicates.
+            var fallback = pool[rng.Next(0, pool.Count)];
+            if (!string.IsNullOrEmpty(fallback)) used.Add(fallback);
+            return fallback;
+        }
+
+        private void ApplyIconsToAllNodes()
+        {
+            foreach (var kvp in _nodes)
+            {
+                if (kvp.Value == null) continue;
+                kvp.Value.ApplyIcon(nodeIconLibrary, bossIconLibrary);
+            }
         }
 
         // =========================================================

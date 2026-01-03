@@ -26,6 +26,12 @@ namespace Game.World
         public string specificEventId;
 
         /// <summary>
+        /// Optional boss identity (e.g., "BOSS_001").
+        /// Used to drive boss-specific visuals and battle setup.
+        /// </summary>
+        public string bossId;
+
+        /// <summary>
         /// 奖励配置 ID。ChapterNode 在生成时根据节点类型赋值，BattleStateMachine 会从 RewardProfileDB 中读取。
         /// </summary>
         public string rewardProfileId;
